@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react"
+import { FormEvent, useEffect, useState } from "react"
 import {
   Avatar,
   Badge,
@@ -59,16 +59,24 @@ import ReviewsScreen from "./ReviewsScreen"
 import TenantApplications from "./TenantApplications"
 import TenantMaintenance from "./TenantMaintenance"
 import TenantPayments from "./TenantPayments"
+import { supabase } from "./lib/supabase"
 
 type AppView = "login" | "register" | "workspace"
 type RegistrationRole = "Tenant" | "Owner"
 type WorkspaceRole = RegistrationRole | "Admin"
 type LoginErrors = Partial<Record<"email" | "password", string>>
 type RegisterErrors = Partial<Record<"role" | "fullName" | "email" | "phone" | "password" | "confirmPassword" | "terms", string>>
+type AuthMessage = { type: "error" | "success" text: string } | null
+type Profile = {
+  id: string
+  full_name: string
+  email: string
+  phone: string | null
+  role: "tenant" | "owner" | "admin"
+  status: "active" | "suspended"
+}
 
 const registrationRoles: RegistrationRole[] = ["Tenant", "Owner"]
-const workspaceRoles: WorkspaceRole[] = ["Tenant", "Owner", "Admin"]
-
 const navigationByRole: Record<WorkspaceRole, string[]> = {
   Tenant: [
     "Dashboard",
@@ -162,7 +170,9 @@ function Brand({
         <House size={compact ? 18 : 22} />
       </div>
       <div
-        className={`text-heading ${inverse ? "text-on-brand" : "text-text-primary"}`}
+        className={`text-heading ${
+          inverse ? "text-on-brand" : "text-text-primary"
+        }`}
       >
         RentEase
       </div>
@@ -176,7 +186,7 @@ function FieldError({ id, message }: { id: string message?: string }) {
   return (
     <div
       id={id}
-      className="mt-xs text-video-title text-danger"
+      className="auth-field-error mt-1 text-xs text-danger"
       aria-live="polite"
     >
       {message}
@@ -210,14 +220,19 @@ function LoginForm({
   onSuccess,
 }: {
   onRegister: () => void
-  onSuccess: () => void
+  onSuccess: (email: string, password: string) => Promise<void>
 }) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState<LoginErrors>({})
+  const [message, setMessage] = useState<AuthMessage>(null)
+  const [resetMode, setResetMode] = useState(false)
+  const [resetEmail, setResetEmail] = useState("")
+  const [resetMessage, setResetMessage] = useState<AuthMessage>(null)
+  const [submitting, setSubmitting] = useState(false)
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     const nextErrors: LoginErrors = {}
@@ -233,11 +248,91 @@ function LoginForm({
     }
 
     setErrors(nextErrors)
-    if (Object.keys(nextErrors).length === 0) onSuccess()
+    setMessage(null)
+    if (Object.keys(nextErrors).length === 0) {
+      setSubmitting(true)
+      try {
+        await onSuccess(email.trim(), password)
+      } catch (error) {
+        setMessage({
+          type: "error",
+          text: error instanceof Error ? error.message : "Unable to log in.",
+        })
+      } finally {
+        setSubmitting(false)
+      }
+    }
+  }
+
+  const resetPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setResetMessage(null)
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail.trim())) {
+      setResetMessage({ type: "error", text: "Enter a valid email address." })
+      return
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      resetEmail.trim(),
+    )
+    if (error) {
+      setResetMessage({ type: "error", text: error.message })
+    } else {
+      setResetMessage({
+        type: "success",
+        text: "Check your email for a password reset link.",
+      })
+    }
+  }
+
+  if (resetMode) {
+    return (
+      <form className="flex flex-col gap-4" onSubmit={resetPassword} noValidate>
+        <div>
+          <div className="text-heading text-text-primary">Reset password</div>
+          <div className="mt-xs text-label-sm text-text-secondary">
+            Enter your email and we will send a secure reset link.
+          </div>
+        </div>
+        <InputField
+          id="reset-email"
+          type="email"
+          label="Email address"
+          placeholder="you@example.com"
+          value={resetEmail}
+          autoComplete="email"
+          className="auth-input-field"
+          onChange={setResetEmail}
+        />
+        {resetMessage ? (
+          <div
+            className={`text-label-sm ${
+              resetMessage.type === "error"
+                ? "text-danger"
+                : "text-brand-primary"
+            }`}
+            role="status"
+          >
+            {resetMessage.text}
+          </div>
+        ) : null}
+        <Button type="submit" variant="primary" className="w-full">
+          Send reset link
+        </Button>
+        <Button
+          type="button"
+          variant="subtle"
+          size="small"
+          onClick={() => setResetMode(false)}
+        >
+          Back to log in
+        </Button>
+      </form>
+    )
   }
 
   return (
-    <form className="flex flex-col gap-xl" onSubmit={submit} noValidate>
+    <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
       <div>
         <InputField
           id="login-email"
@@ -246,6 +341,7 @@ function LoginForm({
           placeholder="you@example.com"
           value={email}
           autoComplete="email"
+          className="auth-input-field"
           aria-invalid={Boolean(errors.email)}
           aria-describedby={errors.email ? "login-email-error" : undefined}
           onChange={(value) => {
@@ -264,6 +360,7 @@ function LoginForm({
           placeholder="Enter your password"
           value={password}
           autoComplete="current-password"
+          className="auth-input-field"
           suffix={
             <PasswordControl
               visible={showPassword}
@@ -283,13 +380,34 @@ function LoginForm({
       </div>
 
       <div className="flex justify-end">
-        <Button type="button" variant="subtle" size="small">
+        <Button
+          type="button"
+          variant="subtle"
+          size="small"
+          onClick={() => setResetMode(true)}
+        >
           Forgot password?
         </Button>
       </div>
 
-      <Button type="submit" variant="primary" className="w-full">
-        Log in
+      {message ? (
+        <div
+          className={`text-label-sm ${
+            message.type === "error" ? "text-danger" : "text-brand-primary"
+          }`}
+          role="alert"
+        >
+          {message.text}
+        </div>
+      ) : null}
+
+      <Button
+        type="submit"
+        variant="primary"
+        className="w-full"
+        disabled={submitting}
+      >
+        {submitting ? "Logging in..." : "Log in"}
       </Button>
 
       <div className="flex items-center justify-center gap-xs text-label-sm text-text-secondary">
@@ -308,7 +426,18 @@ function LoginForm({
   )
 }
 
-function RegisterForm({ onLogin }: { onLogin: () => void }) {
+function RegisterForm({
+  onLogin,
+  onSuccess,
+}: {
+  onLogin: () => void
+  onSuccess: (
+    fullName: string,
+    email: string,
+    phone: string,
+    password: string,
+  ) => Promise<boolean>
+}) {
   const [role, setRole] = useState<RegistrationRole | null>(null)
   const [fullName, setFullName] = useState("")
   const [email, setEmail] = useState("")
@@ -319,12 +448,14 @@ function RegisterForm({ onLogin }: { onLogin: () => void }) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [errors, setErrors] = useState<RegisterErrors>({})
+  const [message, setMessage] = useState<AuthMessage>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   const clearError = (field: keyof RegisterErrors) => {
     setErrors((current) => ({ ...current, [field]: undefined }))
   }
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     const nextErrors: RegisterErrors = {}
@@ -355,25 +486,47 @@ function RegisterForm({ onLogin }: { onLogin: () => void }) {
     }
 
     setErrors(nextErrors)
-    if (Object.keys(nextErrors).length === 0) onLogin()
+    setMessage(null)
+    if (Object.keys(nextErrors).length === 0) {
+      setSubmitting(true)
+      try {
+        const signedIn = await onSuccess(
+          fullName.trim(),
+          email.trim(),
+          phone.trim(),
+          password,
+        )
+        if (signedIn) onLogin()
+      } catch (error) {
+        setMessage({
+          type: "error",
+          text:
+            error instanceof Error
+              ? error.message
+              : "Unable to create account.",
+        })
+      } finally {
+        setSubmitting(false)
+      }
+    }
   }
 
   return (
-    <form className="flex flex-col gap-xl" onSubmit={submit} noValidate>
+    <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
       <div>
-        <div className="mb-md text-label text-text-primary">
+        <div className="mt-4 mb-2 text-sm font-medium text-text-primary">
           I want to join as
         </div>
-        <div className="grid grid-cols-2 gap-md">
+        <div className="grid grid-cols-2 gap-3">
           {registrationRoles.map((item) => (
             <Button
               key={item}
               type="button"
               variant="neutral"
-              className={`rent-role-card ${
+              className={`rent-role-card min-w-0 rounded-xl border p-4 ${
                 role === item
-                  ? "border-border-selected bg-brand-muted text-brand-dark"
-                  : "text-text-primary"
+                  ? "border-2 border-[#1F7F78] bg-[#E8F4F2] text-brand-dark"
+                  : "border-[#D5DEDE] text-text-primary"
               }`}
               aria-pressed={role === item}
               onClick={() => {
@@ -381,21 +534,33 @@ function RegisterForm({ onLogin }: { onLogin: () => void }) {
                 clearError("role")
               }}
             >
-              <span className="flex flex-col items-start gap-xs text-left">
-                <span className="text-label">
+              <span className="relative flex min-w-0 flex-col items-start gap-1 break-words pr-5 text-left">
+                <span className="text-sm font-medium leading-5">
                   {item === "Owner" ? "Owner / Landlord" : "Tenant"}
                 </span>
-                <span className="text-video-title text-text-secondary">
+                <span className="text-xs leading-4 text-text-secondary">
                   {item === "Owner"
                     ? "List and manage properties"
                     : "Find and manage your home"}
                 </span>
+                {item === "Owner" ? (
+                  <span className="text-[10px] leading-4 text-[#A45A0C]">
+                    Approval required
+                  </span>
+                ) : null}
+                {role === item ? (
+                  <Check
+                    size={14}
+                    className="absolute right-0 top-0 text-[#1F7F78]"
+                    aria-hidden="true"
+                  />
+                ) : null}
               </span>
             </Button>
           ))}
         </div>
         <FieldError id="register-role-error" message={errors.role} />
-        <div className="mt-md text-video-title text-text-secondary">
+        <div className="mt-3 text-xs text-text-secondary">
           Admin accounts are created by RentEase administrators.
         </div>
       </div>
@@ -407,6 +572,7 @@ function RegisterForm({ onLogin }: { onLogin: () => void }) {
           placeholder="e.g. Nusrat Jahan"
           value={fullName}
           autoComplete="name"
+          className="auth-input-field"
           aria-invalid={Boolean(errors.fullName)}
           aria-describedby={errors.fullName ? "register-name-error" : undefined}
           onChange={(value) => {
@@ -425,6 +591,7 @@ function RegisterForm({ onLogin }: { onLogin: () => void }) {
           placeholder="you@example.com"
           value={email}
           autoComplete="email"
+          className="auth-input-field"
           aria-invalid={Boolean(errors.email)}
           aria-describedby={errors.email ? "register-email-error" : undefined}
           onChange={(value) => {
@@ -443,6 +610,7 @@ function RegisterForm({ onLogin }: { onLogin: () => void }) {
           placeholder="+880 17XX XXXXXX"
           value={phone}
           autoComplete="tel"
+          className="auth-input-field"
           aria-invalid={Boolean(errors.phone)}
           aria-describedby={errors.phone ? "register-phone-error" : undefined}
           onChange={(value) => {
@@ -461,6 +629,7 @@ function RegisterForm({ onLogin }: { onLogin: () => void }) {
           placeholder="At least 8 characters"
           value={password}
           autoComplete="new-password"
+          className="auth-input-field"
           suffix={
             <PasswordControl
               visible={showPassword}
@@ -487,6 +656,7 @@ function RegisterForm({ onLogin }: { onLogin: () => void }) {
           placeholder="Re-enter your password"
           value={confirmPassword}
           autoComplete="new-password"
+          className="auth-input-field"
           suffix={
             <PasswordControl
               visible={showConfirmPassword}
@@ -511,24 +681,40 @@ function RegisterForm({ onLogin }: { onLogin: () => void }) {
       </div>
 
       <div>
-        <Checkbox
-          label="I agree to the Terms of Service and Privacy Policy"
-          defaultChecked={false}
-          onChange={(checked) => {
-            setAcceptedTerms(checked)
-            clearError("terms")
-          }}
-          aria-invalid={Boolean(errors.terms)}
-          aria-describedby={errors.terms ? "register-terms-error" : undefined}
-        />
+        <div className="auth-terms mt-1 flex items-center gap-2 text-sm">
+          <Checkbox
+            label="I agree to the Terms of Service and Privacy Policy"
+            defaultChecked={false}
+            onChange={(checked) => {
+              setAcceptedTerms(checked)
+              clearError("terms")
+            }}
+            aria-invalid={Boolean(errors.terms)}
+            aria-describedby={errors.terms ? "register-terms-error" : undefined}
+          />
+        </div>
         <FieldError id="register-terms-error" message={errors.terms} />
       </div>
 
-      <Button type="submit" variant="primary" className="w-full">
-        Create account
+      <Button
+        type="submit"
+        variant="primary"
+        className="mt-2 h-12 w-full rounded-xl bg-[#1F7F78] text-white hover:bg-[#176963]"
+      >
+        {submitting ? "Creating account..." : "Create account"}
       </Button>
+      {message ? (
+        <div
+          className={`text-label-sm ${
+            message.type === "error" ? "text-danger" : "text-brand-primary"
+          }`}
+          role="status"
+        >
+          {message.text}
+        </div>
+      ) : null}
 
-      <div className="flex items-center justify-center gap-xs text-label-sm text-text-secondary">
+      <div className="mt-4 flex items-center justify-center gap-xs text-sm text-text-secondary">
         <span>Already have an account?</span>
         <Button
           type="button"
@@ -548,15 +734,22 @@ function AuthScreen({
   view,
   onChangeView,
   onLogin,
+  onRegister,
 }: {
   view: Exclude<AppView, "workspace">
   onChangeView: (view: Exclude<AppView, "workspace">) => void
-  onLogin: () => void
+  onLogin: (email: string, password: string) => Promise<void>
+  onRegister: (
+    fullName: string,
+    email: string,
+    phone: string,
+    password: string,
+  ) => Promise<boolean>
 }) {
   const isLogin = view === "login"
 
   return (
-    <div className="auth-layout min-h-dvh bg-brand-tertiary font-sans text-text-primary">
+    <div className="auth-layout min-h-dvh overflow-x-hidden bg-brand-tertiary font-sans text-text-primary">
       <section className="auth-visual relative overflow-hidden">
         <img
           className="absolute inset-0 h-full w-full object-cover"
@@ -564,7 +757,7 @@ function AuthScreen({
           alt="Sunlit modern apartment living room"
         />
         <div className="auth-photo-overlay absolute inset-0" />
-        <div className="relative z-10 flex h-full flex-col justify-between p-2xl text-on-brand">
+        <div className="relative z-10 flex h-full flex-col justify-between p-10 text-on-brand">
           <div className="auth-brand-on-photo">
             <Brand />
           </div>
@@ -577,12 +770,8 @@ function AuthScreen({
         </div>
       </section>
 
-      <main
-        className={`auth-form-panel flex min-h-0 items-start justify-center overflow-y-auto bg-brand-tertiary p-xl md:p-2xl ${
-          isLogin ? "lg:items-center" : ""
-        }`}
-      >
-        <div className="auth-card w-full rounded-corner-lg border border-border-primary bg-surface-bg p-xl md:p-2xl">
+      <main className="auth-form-panel flex min-h-0 items-center justify-center overflow-y-auto overflow-x-hidden bg-brand-tertiary p-8">
+        <div className="auth-card w-full max-w-[480px] rounded-2xl border border-border-primary bg-surface-bg p-8 shadow-[0_12px_32px_rgba(20,50,48,0.08)]">
           <div className="mb-2xl lg:hidden">
             <Brand compact />
           </div>
@@ -604,7 +793,10 @@ function AuthScreen({
               onSuccess={onLogin}
             />
           ) : (
-            <RegisterForm onLogin={() => onChangeView("login")} />
+            <RegisterForm
+              onLogin={() => onChangeView("login")}
+              onSuccess={onRegister}
+            />
           )}
         </div>
       </main>
@@ -742,10 +934,7 @@ function TenantDashboard({
         </div>
       </div>
 
-      <section
-        className="grid grid-cols-4 gap-xl"
-        aria-label="Rental summary"
-      >
+      <section className="grid grid-cols-4 gap-xl" aria-label="Rental summary">
         {stats.map((stat) => (
           <div
             key={stat.label}
@@ -755,7 +944,9 @@ function TenantDashboard({
               <stat.icon size={20} />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-label-sm text-text-primary">{stat.label}</div>
+              <div className="text-label-sm text-text-primary">
+                {stat.label}
+              </div>
               <div className="mt-md text-heading text-text-primary">
                 {stat.value}
               </div>
@@ -925,10 +1116,7 @@ function TenantDashboard({
                   <td data-label="Amount">{payment.amount}</td>
                   <td data-label="Payment date">{payment.paidOn}</td>
                   <td data-label="Status">
-                    <Badge
-                      label={payment.status}
-                      variant={payment.variant}
-                    />
+                    <Badge label={payment.status} variant={payment.variant} />
                   </td>
                   <td data-label="Action">
                     <Button
@@ -951,18 +1139,23 @@ function TenantDashboard({
   )
 }
 
-function RentEaseShell({ onLogout }: { onLogout: () => void }) {
-  const [role, setRole] = useState<WorkspaceRole>("Tenant")
+function RentEaseShell({
+  profile,
+  onLogout,
+}: {
+  profile: Profile
+  onLogout: () => Promise<void>
+}) {
+  const role: WorkspaceRole =
+    profile.role === "admin"
+      ? "Admin"
+      : profile.role === "owner"
+        ? "Owner"
+        : "Tenant"
   const [activeNav, setActiveNav] = useState("Dashboard")
   const [searchQuery, setSearchQuery] = useState("")
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
   const navigation = navigationByRole[role]
-
-  const changeRole = (nextRole: WorkspaceRole) => {
-    setRole(nextRole)
-    setActiveNav(navigationByRole[nextRole][0])
-    setWorkspaceMenuOpen(false)
-  }
 
   const navigate = (destination: string) => {
     setActiveNav(destination)
@@ -970,9 +1163,7 @@ function RentEaseShell({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="rent-app-shell flex h-dvh bg-brand-tertiary font-sans text-text-primary">
-      <aside
-        className="rent-sidebar fixed inset-y-0 left-0 flex shrink-0 flex-col border-r border-border-primary bg-surface-bg"
-      >
+      <aside className="rent-sidebar fixed inset-y-0 left-0 flex shrink-0 flex-col border-r border-border-primary bg-surface-bg">
         <div className="rent-sidebar-brand flex items-center px-lg">
           <Brand inverse />
         </div>
@@ -987,9 +1178,7 @@ function RentEaseShell({ onLogout }: { onLogout: () => void }) {
             onClick={() => setWorkspaceMenuOpen((open) => !open)}
           >
             <Grid3X3 size={18} />
-            <span className="min-w-0 truncate">
-              {role} workspace
-            </span>
+            <span className="min-w-0 truncate">{role} workspace</span>
             <ChevronDown
               size={16}
               className={`ml-auto shrink-0 ${
@@ -1003,24 +1192,20 @@ function RentEaseShell({ onLogout }: { onLogout: () => void }) {
               role="menu"
               aria-label="Choose workspace"
             >
-            {workspaceRoles.map((item) => (
-              <Button
-                key={item}
-                size="small"
-                variant="subtle"
-                className={`workspace-menu-item w-full justify-start ${
-                  role === item
-                    ? "bg-brand-muted text-brand-primary"
-                    : "text-text-secondary"
-                }`}
-                role="menuitemradio"
-                aria-checked={role === item}
-                onClick={() => changeRole(item)}
-              >
-                <span className="flex-1 text-left">{item}</span>
-                {role === item ? <Check size={16} /> : null}
-              </Button>
-            ))}
+              {[role].map((item) => (
+                <Button
+                  key={item}
+                  size="small"
+                  variant="subtle"
+                  className="workspace-menu-item w-full justify-start bg-brand-muted text-brand-primary"
+                  role="menuitemradio"
+                  aria-checked
+                  onClick={() => setWorkspaceMenuOpen(false)}
+                >
+                  <span className="flex-1 text-left">{item}</span>
+                  <Check size={16} />
+                </Button>
+              ))}
             </div>
           ) : null}
         </div>
@@ -1064,7 +1249,7 @@ function RentEaseShell({ onLogout }: { onLogout: () => void }) {
           <Button
             variant="subtle"
             className="rent-nav-button text-text-secondary"
-            onClick={onLogout}
+            onClick={() => void onLogout()}
           >
             <LogOut size={18} />
             Log out
@@ -1102,10 +1287,19 @@ function RentEaseShell({ onLogout }: { onLogout: () => void }) {
           </div>
 
           <div className="rent-profile flex items-center gap-md border-l border-border-secondary pl-lg">
-            <Avatar type="initial" size="medium" initials="TH" />
+            <Avatar
+              type="initial"
+              size="medium"
+              initials={profile.full_name
+                .split(" ")
+                .map((part) => part[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase()}
+            />
             <div>
               <div className="rent-profile-name text-label-sm text-text-primary">
-                Tanvir Hasan
+                {profile.full_name}
               </div>
               <div className="text-video-title text-text-secondary">{role}</div>
             </div>
@@ -1155,7 +1349,7 @@ function RentEaseShell({ onLogout }: { onLogout: () => void }) {
             <OwnerDashboard />
           ) : null}
           {role === "Owner" && activeNav === "My Properties" ? (
-            <OwnerProperties />
+            <OwnerProperties ownerId={profile.id} />
           ) : null}
           {role === "Owner" && activeNav === "Applications" ? (
             <OwnerApplications />
@@ -1198,7 +1392,6 @@ function RentEaseShell({ onLogout }: { onLogout: () => void }) {
             <AdminReports />
           ) : null}
         </main>
-
       </div>
     </div>
   )
@@ -1206,18 +1399,173 @@ function RentEaseShell({ onLogout }: { onLogout: () => void }) {
 
 export default function App() {
   const [view, setView] = useState<AppView>("login")
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [authMessage, setAuthMessage] = useState<AuthMessage>(null)
+
+  const loadProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, email, phone, role, status")
+      .eq("id", userId)
+      .single()
+
+    if (error) {
+      throw new Error(`Unable to load your profile: ${error.message}`)
+    }
+    if (data.status !== "active") {
+      throw new Error("Your RentEase account is not active.")
+    }
+    setProfile(data as Profile)
+    setView("workspace")
+  }
+
+  useEffect(() => {
+    let active = true
+
+    const restoreSession = async () => {
+      const { data, error } = await supabase.auth.getSession()
+      if (error) {
+        if (active) {
+          setAuthMessage({ type: "error", text: error.message })
+          setAuthLoading(false)
+        }
+        return
+      }
+
+      if (data.session) {
+        try {
+          await loadProfile(data.session.user.id)
+        } catch (error) {
+          await supabase.auth.signOut()
+          if (active) {
+            setAuthMessage({
+              type: "error",
+              text:
+                error instanceof Error
+                  ? error.message
+                  : "Unable to load your profile.",
+            })
+          }
+        }
+      }
+      if (active) setAuthLoading(false)
+    }
+
+    void restoreSession()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return
+      if (event === "SIGNED_OUT" || !session) {
+        setProfile(null)
+        setView("login")
+        setAuthLoading(false)
+        return
+      }
+
+      if (
+        event === "SIGNED_IN" ||
+        event === "TOKEN_REFRESHED" ||
+        event === "USER_UPDATED"
+      ) {
+        setAuthLoading(true)
+        window.setTimeout(() => {
+          if (!active) return
+          void loadProfile(session.user.id)
+            .catch(async (error) => {
+              if (!active) return
+              setProfile(null)
+              setView("login")
+              setAuthMessage({
+                type: "error",
+                text:
+                  error instanceof Error
+                    ? error.message
+                    : "Unable to load your profile.",
+              })
+              await supabase.auth.signOut()
+            })
+            .finally(() => {
+              if (active) setAuthLoading(false)
+            })
+        }, 0)
+      }
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  const login = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+    if (error) throw new Error(error.message)
+    if (!data.session)
+      throw new Error("Your email must be confirmed before logging in.")
+    await loadProfile(data.user.id)
+  }
+
+  const register = async (
+    fullName: string,
+    email: string,
+    phone: string,
+    password: string,
+  ) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName, phone } },
+    })
+    if (error) throw new Error(error.message)
+    if (!data.session) {
+      setAuthMessage({
+        type: "success",
+        text: "Account created. Check your email to confirm your account.",
+      })
+      return false
+    }
+    await loadProfile(data.user.id)
+    return true
+  }
+
+  const logout = async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) setAuthMessage({ type: "error", text: error.message })
+  }
+
+  if (authLoading) {
+    return (
+      <ThemeProvider>
+        <div className="flex min-h-dvh items-center justify-center bg-brand-tertiary font-sans text-text-secondary">
+          Loading your RentEase session...
+        </div>
+      </ThemeProvider>
+    )
+  }
 
   return (
     <ThemeProvider>
-      {view === "workspace" ? (
-        <RentEaseShell onLogout={() => setView("login")} />
+      {view === "workspace" && profile ? (
+        <RentEaseShell profile={profile} onLogout={logout} />
       ) : (
         <AuthScreen
           view={view}
           onChangeView={setView}
-          onLogin={() => setView("workspace")}
+          onLogin={login}
+          onRegister={register}
         />
       )}
+      {authMessage ? (
+        <div className="fixed bottom-xl left-1/2 z-50 -translate-x-1/2 rounded-corner-md bg-surface-bg px-xl py-lg text-label-sm shadow-lg">
+          {authMessage.text}
+        </div>
+      ) : null}
     </ThemeProvider>
   )
 }

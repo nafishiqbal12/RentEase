@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
+  useEffect,
   useState,
 } from "react"
 import {
@@ -14,9 +15,10 @@ import {
   SwitchField,
 } from "@figma/astraui"
 import { ChevronLeft, Heart, MapPin, Star } from "lucide-react"
+import { supabase } from "./lib/supabase"
 
 type Property = {
-  id: number
+  id: number | string
   title: string
   location: string
   rent: string
@@ -386,7 +388,13 @@ function PropertyCard({
   )
 }
 
-function MapPanel({ onOpen }: { onOpen: (property: Property) => void }) {
+function MapPanel({
+  properties,
+  onOpen,
+}: {
+  properties: Property[]
+  onOpen: (property: Property) => void
+}) {
   return (
     <div
       className="search-map dashboard-card relative overflow-hidden rounded-corner-lg border border-border-primary"
@@ -413,7 +421,17 @@ function MapPanel({ onOpen }: { onOpen: (property: Property) => void }) {
   )
 }
 
-function SearchResults({ onOpen }: { onOpen: (property: Property) => void }) {
+function SearchResults({
+  properties,
+  loading,
+  error,
+  onOpen,
+}: {
+  properties: Property[]
+  loading: boolean
+  error: string | null
+  onOpen: (property: Property) => void
+}) {
   const [location, setLocation] = useState("Dhanmondi, Dhaka")
   const [view, setView] = useState<"list" | "map">("list")
   const [sort, setSort] = useState("recommended")
@@ -455,7 +473,7 @@ function SearchResults({ onOpen }: { onOpen: (property: Property) => void }) {
           <div className="mb-xl flex flex-col gap-lg sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="text-heading text-text-primary">
-                126 properties found
+                {properties.length} properties found
               </div>
               <div className="mt-xs text-video-title text-text-secondary">
                 Around Dhanmondi and nearby areas
@@ -502,7 +520,22 @@ function SearchResults({ onOpen }: { onOpen: (property: Property) => void }) {
             </div>
           </div>
 
-          {view === "list" ? (
+          {loading ? (
+            <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">
+              Loading verified properties...
+            </div>
+          ) : error ? (
+            <div
+              className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-danger"
+              role="alert"
+            >
+              {error}
+            </div>
+          ) : properties.length === 0 ? (
+            <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">
+              No approved properties are available yet.
+            </div>
+          ) : view === "list" ? (
             <div className="grid grid-cols-1 gap-xl xl:grid-cols-2">
               {properties.map((property) => (
                 <PropertyCard
@@ -515,7 +548,7 @@ function SearchResults({ onOpen }: { onOpen: (property: Property) => void }) {
               ))}
             </div>
           ) : (
-            <MapPanel onOpen={onOpen} />
+            <MapPanel properties={properties} onOpen={onOpen} />
           )}
         </div>
       </div>
@@ -752,6 +785,51 @@ export default function PropertySearch({ onApply }: { onApply?: () => void }) {
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(
     null,
   )
+  const [properties, setProperties] = useState<Property[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    const loadProperties = async () => {
+      const { data, error: queryError } = await supabase
+        .from("properties")
+        .select(
+          "id, title, address, city, bedrooms, bathrooms, size_sq_ft, monthly_rent, security_deposit, property_type, image_urls",
+        )
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+
+      if (!active) return
+      if (queryError) {
+        setError(`Unable to load properties: ${queryError.message}`)
+      } else {
+        setProperties(
+          (data ?? []).map((property) => ({
+            id: property.id,
+            title: property.title,
+            location: `${property.address}, ${property.city}`,
+            rent: `৳${Number(property.monthly_rent).toLocaleString("en-BD")}`,
+            beds: property.bedrooms,
+            baths: Number(property.bathrooms),
+            size: property.size_sq_ft
+              ? `${property.size_sq_ft.toLocaleString()} sq ft`
+              : "Size unavailable",
+            type:
+              property.property_type.charAt(0).toUpperCase() +
+              property.property_type.slice(1),
+            image: property.image_urls[0] ?? properties[0]?.image ?? "",
+          })),
+        )
+      }
+      setLoading(false)
+    }
+
+    void loadProperties()
+    return () => {
+      active = false
+    }
+  }, [])
 
   return selectedProperty ? (
     <PropertyDetails
@@ -760,6 +838,11 @@ export default function PropertySearch({ onApply }: { onApply?: () => void }) {
       onApply={onApply}
     />
   ) : (
-    <SearchResults onOpen={setSelectedProperty} />
+    <SearchResults
+      properties={properties}
+      loading={loading}
+      error={error}
+      onOpen={setSelectedProperty}
+    />
   )
 }

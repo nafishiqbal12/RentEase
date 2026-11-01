@@ -1,4 +1,4 @@
-import { type DragEvent, type KeyboardEvent, useState } from "react"
+import { type DragEvent, type KeyboardEvent, useEffect, useState } from "react"
 import {
   Badge,
   Button,
@@ -7,22 +7,49 @@ import {
   SelectField,
   TextareaField,
 } from "@figma/astraui"
+import { supabase } from "./lib/supabase"
 
 type ListingStatus = "Pending Verification" | "Approved" | "Rejected" | "Rented"
 
 type OwnerListing = {
-  id: number
+  id: string
   title: string
   location: string
   rent: string
   status: ListingStatus
   image: string
+  propertyType?: string
+  bedrooms?: number
+  bathrooms?: number
+  sizeSqFt?: number | null
+  monthlyRent?: number
+  securityDeposit?: number | null
+  availabilityDate?: string | null
+  description?: string | null
+  amenities?: string[]
+  imageUrls?: string[]
+}
+
+type PropertyDraft = {
+  propertyType: string
+  title: string
+  location: string
+  bedrooms: string
+  bathrooms: string
+  size: string
+  rent: string
+  deposit: string
+  availability: string
+  description: string
+  amenities: string[]
+  imageFiles: File[]
 }
 
 type Preview = {
   name: string
   url: string
   type: "image" | "video"
+  file?: File
 }
 
 const propertyPhotos = [
@@ -31,10 +58,11 @@ const propertyPhotos = [
   "https://images.unsplash.com/photo-1768413292179-d958b344f1d4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHw0fHxtb2Rlcm4lMjBhcGFydG1lbnQlMjBpbnRlcmlvciUyMGhvdXNlJTIwZnVybmlzaGVkJTIwcmVudGFsJTIwcHJvcGVydHl8ZW58MXx8fHwxNzkxODg2MjEyfDA&ixlib=rb-4.1.0&q=80&w=1080",
   "https://images.unsplash.com/photo-1768413292140-0442cb61a989?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHw1fHxtb2Rlcm4lMjBhcGFydG1lbnQlMjBpbnRlcmlvciUyMGhvdXNlJTIwZnVybmlzaGVkJTIwcmVudGFsJTIwcHJvcGVydHl8ZW58MXx8fHwxNzkxODg2MjEyfDA&ixlib=rb-4.1.0&q=80&w=1080",
 ]
+const propertyImageBucket = "property-images"
 
 const initialListings: OwnerListing[] = [
   {
-    id: 1,
+    id: "demo-1",
     title: "Gulshan Lakeview Residence",
     location: "Road 54, Gulshan 2, Dhaka",
     rent: "৳72,000 / month",
@@ -42,7 +70,7 @@ const initialListings: OwnerListing[] = [
     image: propertyPhotos[0],
   },
   {
-    id: 2,
+    id: "demo-2",
     title: "Dhanmondi Family Apartment",
     location: "Road 8A, Dhanmondi, Dhaka",
     rent: "৳38,000 / month",
@@ -50,7 +78,7 @@ const initialListings: OwnerListing[] = [
     image: propertyPhotos[1],
   },
   {
-    id: 3,
+    id: "demo-3",
     title: "Uttara Garden House",
     location: "Sector 11, Uttara, Dhaka",
     rent: "৳52,000 / month",
@@ -58,7 +86,7 @@ const initialListings: OwnerListing[] = [
     image: propertyPhotos[2],
   },
   {
-    id: 4,
+    id: "demo-4",
     title: "Banani Executive Studio",
     location: "Banani 11, Dhaka",
     rent: "৳28,000 / month",
@@ -74,16 +102,64 @@ function listingVariant(status: ListingStatus) {
   return "brand" as const
 }
 
+function toOwnerListing(property: {
+  id: string
+  title: string
+  address: string
+  city: string
+  property_type: string
+  bedrooms: number
+  bathrooms: number
+  size_sq_ft: number | null
+  monthly_rent: number
+  security_deposit: number | null
+  availability_date: string | null
+  description: string | null
+  amenities: string[]
+  image_urls: string[]
+  status: string
+}): OwnerListing {
+  return {
+    id: property.id,
+    title: property.title,
+    location: `${property.address}, ${property.city}`,
+    rent: `৳${Number(property.monthly_rent).toLocaleString("en-BD")} / month`,
+    status:
+      property.status === "pending_verification"
+        ? "Pending Verification"
+        : property.status === "approved"
+          ? "Approved"
+          : property.status === "rejected"
+            ? "Rejected"
+            : "Rented",
+    image: property.image_urls[0] ?? propertyPhotos[0],
+    propertyType: property.property_type,
+    bedrooms: property.bedrooms,
+    bathrooms: Number(property.bathrooms),
+    sizeSqFt: property.size_sq_ft,
+    monthlyRent: Number(property.monthly_rent),
+    securityDeposit: property.security_deposit,
+    availabilityDate: property.availability_date,
+    description: property.description,
+    amenities: property.amenities,
+    imageUrls: property.image_urls,
+  }
+}
+
 function MyProperties({
   listings,
+  loading,
+  error,
   onAdd,
   onEdit,
   onDelete,
 }: {
   listings: OwnerListing[]
+  loading: boolean
+  error: string | null
   onAdd: () => void
   onEdit: (listing: OwnerListing) => void
-  onDelete: (id: number) => void
+  onDelete: (id: string) => void
 }) {
   return (
     <div className="rent-page-content flex flex-col gap-2xl p-xl md:p-2xl">
@@ -99,62 +175,81 @@ function MyProperties({
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-xl lg:grid-cols-2 xl:grid-cols-3">
-        {listings.map((listing) => (
-          <article
-            key={listing.id}
-            className="dashboard-card overflow-hidden rounded-corner-lg border border-border-primary bg-surface-bg"
-          >
-            <img
-              className="owner-property-image w-full object-cover"
-              src={listing.image}
-              alt={listing.title}
-            />
-            <div className="p-xl">
-              <div className="flex items-start justify-between gap-lg">
-                <div className="min-w-0">
-                  <div className="text-label text-text-primary">
-                    {listing.title}
+      {loading ? (
+        <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">
+          Loading your properties...
+        </div>
+      ) : error ? (
+        <div
+          className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-danger"
+          role="alert"
+        >
+          {error}
+        </div>
+      ) : listings.length === 0 ? (
+        <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">
+          You have not added any properties yet.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-xl lg:grid-cols-2 xl:grid-cols-3">
+          {listings.map((listing) => (
+            <article
+              key={listing.id}
+              className="dashboard-card overflow-hidden rounded-corner-lg border border-border-primary bg-surface-bg"
+            >
+              <img
+                className="owner-property-image w-full object-cover"
+                src={listing.image}
+                alt={listing.title}
+              />
+              <div className="p-xl">
+                <div className="flex items-start justify-between gap-lg">
+                  <div className="min-w-0">
+                    <div className="text-label text-text-primary">
+                      {listing.title}
+                    </div>
+                    <div className="mt-xs text-video-title text-text-secondary">
+                      {listing.location}
+                    </div>
                   </div>
-                  <div className="mt-xs text-video-title text-text-secondary">
-                    {listing.location}
-                  </div>
+                  <Badge
+                    label={listing.status}
+                    variant={listingVariant(listing.status)}
+                    className={
+                      listing.status === "Rented"
+                        ? "status-assigned"
+                        : undefined
+                    }
+                  />
                 </div>
-                <Badge
-                  label={listing.status}
-                  variant={listingVariant(listing.status)}
-                  className={
-                    listing.status === "Rented" ? "status-assigned" : undefined
-                  }
-                />
-              </div>
 
-              <div className="mt-lg text-heading text-brand-dark">
-                {listing.rent}
-              </div>
+                <div className="mt-lg text-heading text-brand-dark">
+                  {listing.rent}
+                </div>
 
-              <div className="mt-xl flex gap-md border-t border-border-secondary pt-lg">
-                <Button
-                  variant="neutral"
-                  size="small"
-                  className="flex-1"
-                  onClick={() => onEdit(listing)}
-                >
-                  Edit
-                </Button>
-                <Button
-                  variant="neutral"
-                  size="small"
-                  className="owner-delete-button flex-1"
-                  onClick={() => onDelete(listing.id)}
-                >
-                  Delete
-                </Button>
+                <div className="mt-xl flex gap-md border-t border-border-secondary pt-lg">
+                  <Button
+                    variant="neutral"
+                    size="small"
+                    className="flex-1"
+                    onClick={() => onEdit(listing)}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="neutral"
+                    size="small"
+                    className="owner-delete-button flex-1"
+                    onClick={() => onDelete(listing.id)}
+                  >
+                    Delete
+                  </Button>
+                </div>
               </div>
-            </div>
-          </article>
-        ))}
-      </div>
+            </article>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -188,30 +283,41 @@ function Stepper({ step }: { step: number }) {
 
 function AddProperty({
   editing,
-  onCancel,
   onSubmit,
+  onCancel,
 }: {
   editing: OwnerListing | null
   onCancel: () => void
-  onSubmit: (listing: OwnerListing) => void
+  onSubmit: (draft: PropertyDraft) => Promise<void>
 }) {
   const [step, setStep] = useState(1)
   const [submitted, setSubmitted] = useState(false)
-  const [propertyType, setPropertyType] = useState("apartment")
+  const [propertyType, setPropertyType] = useState(
+    editing?.propertyType ?? "apartment",
+  )
   const [title, setTitle] = useState(editing?.title ?? "")
   const [location, setLocation] = useState(editing?.location ?? "")
-  const [beds, setBeds] = useState("3")
-  const [baths, setBaths] = useState("2")
-  const [size, setSize] = useState("")
-  const [rent, setRent] = useState("")
-  const [deposit, setDeposit] = useState("")
-  const [availability, setAvailability] = useState("")
-  const [description, setDescription] = useState("")
+  const [beds, setBeds] = useState(String(editing?.bedrooms ?? 0))
+  const [baths, setBaths] = useState(String(editing?.bathrooms ?? 0))
+  const [size, setSize] = useState(
+    editing?.sizeSqFt ? String(editing.sizeSqFt) : "",
+  )
+  const [rent, setRent] = useState(
+    editing?.monthlyRent ? String(editing.monthlyRent) : "",
+  )
+  const [deposit, setDeposit] = useState(
+    editing?.securityDeposit ? String(editing.securityDeposit) : "",
+  )
+  const [availability, setAvailability] = useState(
+    editing?.availabilityDate ?? "",
+  )
+  const [description, setDescription] = useState(editing?.description ?? "")
   const [amenities, setAmenities] = useState<string[]>([
-    "Lift",
-    "24/7 Security",
+    ...(editing?.amenities ?? ["Lift", "24/7 Security"]),
   ])
   const [previews, setPreviews] = useState<Preview[]>([])
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const toggleAmenity = (amenity: string, selected: boolean) => {
     setAmenities((current) =>
@@ -222,17 +328,25 @@ function AddProperty({
   }
 
   const addFiles = (files: FileList | File[]) => {
-    const nextPreviews = Array.from(files)
+    const selectedFiles = Array.from(files)
+    const invalidFile = selectedFiles.find(
+      (file) => !file.type.startsWith("image/") || file.size > 10 * 1024 * 1024,
+    )
+    if (invalidFile) {
+      setSubmitError(
+        `${invalidFile.name} is not a supported image or exceeds the 10 MB limit.`,
+      )
+    }
+    const nextPreviews = selectedFiles
       .filter(
         (file) =>
-          file.type.startsWith("image/") || file.type.startsWith("video/"),
+          file.type.startsWith("image/") && file.size <= 10 * 1024 * 1024,
       )
       .map((file) => ({
         name: file.name,
         url: URL.createObjectURL(file),
-        type: file.type.startsWith("video/")
-          ? "video" as const
-          : "image" as const,
+        type: "image" as const,
+        file,
       }))
     setPreviews((current) => [...current, ...nextPreviews])
   }
@@ -255,10 +369,9 @@ function AddProperty({
         multiple: true,
         types: [
           {
-            description: "Property photos and video",
+            description: "Property photos",
             accept: {
               "image/*": [".jpg", ".jpeg", ".png", ".webp"],
-              "video/*": [".mp4", ".webm"],
             },
           },
         ],
@@ -281,16 +394,63 @@ function AddProperty({
     }
   }
 
-  const submitListing = () => {
-    onSubmit({
-      id: editing?.id ?? Date.now(),
-      title: title || "New Property Listing",
-      location: location || "Dhaka",
-      rent: rent ? `৳${rent} / month` : "Rent not set",
-      status: "Pending Verification",
-      image: previews[0]?.url ?? editing?.image ?? propertyPhotos[0],
-    })
-    setSubmitted(true)
+  const submitListing = async () => {
+    const numericFields = [
+      ["bedrooms", beds, 0],
+      ["bathrooms", baths, 0],
+      ["size", size, 1],
+      ["monthly rent", rent, 1],
+      ["security deposit", deposit, 0],
+    ] as const
+    const invalidNumber = numericFields.find(
+      ([, value, minimum]) =>
+        value !== "" &&
+        (!Number.isFinite(Number(value)) || Number(value) < minimum),
+    )
+    if (!title.trim() || !location.trim()) {
+      setSubmitError("Listing title and location are required.")
+      return
+    }
+    if (title.trim().length > 160) {
+      setSubmitError("Listing title must be 160 characters or fewer.")
+      return
+    }
+    if (invalidNumber) {
+      setSubmitError(`${invalidNumber[0]} must be a valid number.`)
+      return
+    }
+    if (!rent || Number(rent) <= 0) {
+      setSubmitError("Monthly rent must be greater than zero.")
+      return
+    }
+
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      await onSubmit({
+        propertyType,
+        title: title.trim(),
+        location: location.trim(),
+        bedrooms: beds,
+        bathrooms: baths,
+        size,
+        rent,
+        deposit,
+        availability,
+        description: description.trim(),
+        amenities,
+        imageFiles: previews.flatMap((preview) =>
+          preview.file ? [preview.file] : [],
+        ),
+      })
+      setSubmitted(true)
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : "Unable to save property.",
+      )
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   if (submitted) {
@@ -304,7 +464,9 @@ function AddProperty({
             Property submitted successfully
           </div>
           <div className="mt-md text-label-sm text-text-secondary">
-            Your listing will be visible after admin approval.
+            {editing
+              ? "Your property changes were saved."
+              : "Your listing will be visible after admin approval."}
           </div>
           <Button variant="primary" className="mt-2xl" onClick={onCancel}>
             View My Properties
@@ -500,7 +662,7 @@ function AddProperty({
                 onDrop={handleDrop}
               >
                 <div className="text-label text-text-primary">
-                  Drag and drop photos or video here
+                  Drag and drop property photos here
                 </div>
                 <div className="mt-xs text-video-title text-text-secondary">
                   JPG, PNG, WEBP, or MP4
@@ -562,29 +724,157 @@ function AddProperty({
                 Continue
               </Button>
             ) : (
-              <Button variant="primary" onClick={submitListing}>
-                Submit for verification
+              <Button
+                variant="primary"
+                onClick={() => void submitListing()}
+                disabled={submitting}
+              >
+                {submitting
+                  ? "Saving..."
+                  : editing
+                    ? "Save changes"
+                    : "Submit for verification"}
               </Button>
             )}
           </div>
+          {submitError ? (
+            <div className="mt-lg text-label-sm text-danger" role="alert">
+              {submitError}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
   )
 }
 
-export default function OwnerProperties() {
-  const [listings, setListings] = useState(initialListings)
+export default function OwnerProperties({ ownerId }: { ownerId: string }) {
+  const [listings, setListings] = useState<OwnerListing[]>([])
   const [editing, setEditing] = useState<OwnerListing | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const saveListing = (listing: OwnerListing) => {
-    setListings((current) => {
-      const exists = current.some((item) => item.id === listing.id)
-      return exists
-        ? current.map((item) => (item.id === listing.id ? listing : item))
-        : [listing, ...current]
-    })
+  useEffect(() => {
+    let active = true
+    const loadListings = async () => {
+      const { data, error: queryError } = await supabase
+        .from("properties")
+        .select(
+          "id, title, address, city, property_type, bedrooms, bathrooms, size_sq_ft, monthly_rent, security_deposit, availability_date, description, amenities, image_urls, status",
+        )
+        .eq("owner_id", ownerId)
+        .order("created_at", { ascending: false })
+
+      if (!active) return
+      if (queryError) {
+        setError(`Unable to load your properties: ${queryError.message}`)
+      } else {
+        setListings((data ?? []).map(toOwnerListing))
+      }
+      setLoading(false)
+    }
+
+    void loadListings()
+    return () => {
+      active = false
+    }
+  }, [ownerId])
+
+  const saveListing = async (draft: PropertyDraft) => {
+    const locationParts = draft.location.split(",")
+    const city = locationParts.pop()?.trim() || "Dhaka"
+    const address = locationParts.join(",").trim() || city
+    const basePayload = {
+      title: draft.title,
+      address,
+      city,
+      property_type: draft.propertyType,
+      bedrooms: Number(draft.bedrooms),
+      bathrooms: Number(draft.bathrooms),
+      size_sq_ft: draft.size ? Number(draft.size) : null,
+      monthly_rent: Number(draft.rent),
+      security_deposit: draft.deposit ? Number(draft.deposit) : null,
+      availability_date: draft.availability || null,
+      description: draft.description || null,
+      amenities: draft.amenities,
+    }
+
+    const result = editing
+      ? await supabase
+          .from("properties")
+          .update(basePayload)
+          .eq("id", editing.id)
+          .eq("owner_id", ownerId)
+          .select(
+            "id, title, address, city, property_type, bedrooms, bathrooms, size_sq_ft, monthly_rent, security_deposit, availability_date, description, amenities, image_urls, status",
+          )
+          .single()
+      : await supabase
+          .from("properties")
+          .insert({ ...basePayload, owner_id: ownerId })
+          .select(
+            "id, title, address, city, property_type, bedrooms, bathrooms, size_sq_ft, monthly_rent, security_deposit, availability_date, description, amenities, image_urls, status",
+          )
+          .single()
+
+    if (result.error) {
+      throw new Error(`Unable to save property: ${result.error.message}`)
+    }
+    let savedProperty = result.data
+    const uploadedUrls: string[] = []
+
+    for (const file of draft.imageFiles) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-")
+      const path = `${ownerId}/${savedProperty.id}/${crypto.randomUUID()}-${safeName}`
+      const { error: uploadError } = await supabase.storage
+        .from(propertyImageBucket)
+        .upload(path, file, {
+          cacheControl: "3600",
+          contentType: file.type,
+          upsert: false,
+        })
+
+      if (uploadError) {
+        throw new Error(`Unable to upload ${file.name}: ${uploadError.message}`)
+      }
+
+      const { data: publicUrl } = supabase.storage
+        .from(propertyImageBucket)
+        .getPublicUrl(path)
+      uploadedUrls.push(publicUrl.publicUrl)
+    }
+
+    if (uploadedUrls.length > 0) {
+      const { data: propertyWithImages, error: imageUpdateError } =
+        await supabase
+          .from("properties")
+          .update({
+            image_urls: [...(savedProperty.image_urls ?? []), ...uploadedUrls],
+          })
+          .eq("id", savedProperty.id)
+          .eq("owner_id", ownerId)
+          .select(
+            "id, title, address, city, property_type, bedrooms, bathrooms, size_sq_ft, monthly_rent, security_deposit, availability_date, description, amenities, image_urls, status",
+          )
+          .single()
+
+      if (imageUpdateError) {
+        throw new Error(
+          `Images uploaded, but property image links could not be saved: ${imageUpdateError.message}`,
+        )
+      }
+      savedProperty = propertyWithImages
+    }
+
+    const savedListing = toOwnerListing(savedProperty)
+    setListings((current) =>
+      editing
+        ? current.map((item) =>
+            item.id === savedListing.id ? savedListing : item,
+          )
+        : [savedListing, ...current],
+    )
   }
 
   if (showForm) {
@@ -603,6 +893,8 @@ export default function OwnerProperties() {
   return (
     <MyProperties
       listings={listings}
+      loading={loading}
+      error={error}
       onAdd={() => {
         setEditing(null)
         setShowForm(true)
