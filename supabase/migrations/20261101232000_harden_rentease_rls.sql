@@ -433,7 +433,6 @@ to authenticated
 using (id = (select auth.uid()))
 with check (
   id = (select auth.uid())
-  and email = (select email from auth.users where id = (select auth.uid()))
 );
 
 drop policy if exists "Owners can update their pending properties" on public.properties;
