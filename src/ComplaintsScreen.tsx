@@ -18,7 +18,7 @@ type Complaint = {
   description: string
   attachment?: string
   status: ComplaintStatus
-  history: Array<{ date: string event: string }>
+  history: Array<{ date: string; event: string }>
 }
 
 const initialComplaints: Complaint[] = [

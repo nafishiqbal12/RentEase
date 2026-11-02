@@ -1,176 +1,34 @@
+import { useEffect, useState } from "react"
 import { Badge } from "@figma/astraui"
+import { supabase } from "./lib/supabase"
 
-type TransactionStatus = "Completed" | "Pending" | "Failed"
+type Payment = { id: string; amount: number; due_date: string; paid_at: string | null; status: string; tenant: string; owner: string; property: string }
 
-type Transaction = {
-  id: string
-  tenant: string
-  owner: string
-  property: string
-  amount: string
-  date: string
-  status: TransactionStatus
-}
-
-const transactions: Transaction[] = [
-  {
-    id: "TXN-251024-1842",
-    tenant: "Araf Rahman",
-    owner: "Farhana Ahmed",
-    property: "Lakeview Heights, Flat 4B",
-    amount: "৳18,000",
-    date: "24 Oct 2025",
-    status: "Completed",
-  },
-  {
-    id: "TXN-251024-1731",
-    tenant: "Samira Hossain",
-    owner: "Mahmud Karim",
-    property: "Gulshan Avenue Residence",
-    amount: "৳42,000",
-    date: "24 Oct 2025",
-    status: "Completed",
-  },
-  {
-    id: "TXN-251023-1610",
-    tenant: "Nafis Ahmed",
-    owner: "Sadia Rahman",
-    property: "Uttara Garden House",
-    amount: "৳32,000",
-    date: "23 Oct 2025",
-    status: "Pending",
-  },
-  {
-    id: "TXN-251022-1459",
-    tenant: "Raisa Karim",
-    owner: "Farhana Ahmed",
-    property: "Banani Executive Studio",
-    amount: "৳28,000",
-    date: "22 Oct 2025",
-    status: "Failed",
-  },
-  {
-    id: "TXN-251021-1324",
-    tenant: "Mahin Chowdhury",
-    owner: "Mahmud Karim",
-    property: "Bashundhara Corner Flat",
-    amount: "৳35,000",
-    date: "21 Oct 2025",
-    status: "Completed",
-  },
-]
-
-function transactionVariant(status: TransactionStatus) {
-  if (status === "Completed") return "success" as const
-  if (status === "Failed") return "danger" as const
-  return "warning" as const
+function variant(status: string) {
+  return status === "paid" ? "success" as const : status === "overdue" ? "danger" as const : "warning" as const
 }
 
 export default function AdminTransactions() {
-  const summaries = [
-    {
-      label: "Total Volume",
-      value: "৳4.8Cr",
-      detail: "Processed this month",
-      variant: "brand" as const,
-    },
-    {
-      label: "Completed",
-      value: "৳4.52Cr",
-      detail: "1,284 transactions",
-      variant: "success" as const,
-    },
-    {
-      label: "Pending",
-      value: "৳24.6L",
-      detail: "42 transactions",
-      variant: "warning" as const,
-    },
-    {
-      label: "Failed",
-      value: "৳3.4L",
-      detail: "11 transactions",
-      variant: "danger" as const,
-    },
-  ]
+  const [payments, setPayments] = useState<Payment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  return (
-    <div className="rent-page-content flex flex-col gap-2xl p-xl md:p-2xl">
-      <div>
-        <div className="text-title text-text-primary">Transactions</div>
-        <div className="mt-xs text-label-sm text-text-secondary">
-          Monitor rent payments processed through RentEase.
-        </div>
-      </div>
+  useEffect(() => {
+    void supabase.from("payments").select("id, amount, due_date, paid_at, status, leases(properties(title), owner:profiles!leases_owner_id_fkey(full_name)), tenant:profiles!payments_tenant_id_fkey(full_name)").order("due_date", { ascending: false }).limit(100).then(({ data, error: queryError }) => {
+      if (queryError) setError(`Unable to load payments: ${queryError.message}`)
+      else setPayments((data ?? []).map((item) => {
+        const lease = Array.isArray(item.leases) ? item.leases[0] : item.leases
+        const property = lease?.properties && (Array.isArray(lease.properties) ? lease.properties[0] : lease.properties)
+        const owner = lease?.owner && (Array.isArray(lease.owner) ? lease.owner[0] : lease.owner)
+        const tenant = Array.isArray(item.tenant) ? item.tenant[0] : item.tenant
+        return { id: item.id, amount: Number(item.amount), due_date: item.due_date, paid_at: item.paid_at, status: item.status, tenant: tenant?.full_name ?? "Tenant", owner: owner?.full_name ?? "Owner", property: property?.title ?? "Property" }
+      }))
+      setLoading(false)
+    })
+  }, [])
 
-      <section
-        className="grid grid-cols-1 gap-xl sm:grid-cols-2 xl:grid-cols-4"
-        aria-label="Transaction summary"
-      >
-        {summaries.map((summary) => (
-          <div
-            key={summary.label}
-            className="dashboard-card h-full rounded-corner-lg border border-border-primary bg-surface-bg p-xl"
-          >
-            <div className="flex items-center justify-between gap-lg">
-              <div className="text-label-sm text-text-secondary">
-                {summary.label}
-              </div>
-              <Badge label={summary.label} variant={summary.variant} />
-            </div>
-            <div className="mt-md text-heading text-text-primary">
-              {summary.value}
-            </div>
-            <div className="mt-xs text-video-title text-text-secondary">
-              {summary.detail}
-            </div>
-          </div>
-        ))}
-      </section>
-
-      <section className="dashboard-card overflow-hidden rounded-corner-lg border border-border-primary bg-surface-bg">
-        <div className="p-xl">
-          <div className="text-heading text-text-primary">
-            Recent Transactions
-          </div>
-          <div className="mt-xs text-video-title text-text-secondary">
-            Latest platform payment activity
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="admin-transactions-table w-full">
-            <thead>
-              <tr>
-                <th>Transaction</th>
-                <th>Tenant</th>
-                <th>Owner</th>
-                <th>Property</th>
-                <th>Amount</th>
-                <th>Date</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map((transaction) => (
-                <tr key={transaction.id}>
-                  <td data-label="Transaction">{transaction.id}</td>
-                  <td data-label="Tenant">{transaction.tenant}</td>
-                  <td data-label="Owner">{transaction.owner}</td>
-                  <td data-label="Property">{transaction.property}</td>
-                  <td data-label="Amount">{transaction.amount}</td>
-                  <td data-label="Date">{transaction.date}</td>
-                  <td data-label="Status">
-                    <Badge
-                      label={transaction.status}
-                      variant={transactionVariant(transaction.status)}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-  )
+  const paid = payments.filter((payment) => payment.status === "paid")
+  const pending = payments.filter((payment) => payment.status !== "paid")
+  const summaryCards: Array<[string, Payment[]]> = [["Total", payments], ["Paid", paid], ["Outstanding", pending]]
+  return <div className="rent-page-content flex flex-col gap-2xl p-xl md:p-2xl"><div><div className="text-title text-text-primary">Transactions</div><div className="mt-xs text-label-sm text-text-secondary">Monitor payment records and platform activity.</div></div>{loading ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">Loading transactions...</div> : null}{error ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-xl text-label-sm text-danger" role="alert">{error}</div> : null}{!loading && !error && payments.length === 0 ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">No payment records found.</div> : null}<section className="grid grid-cols-1 gap-xl sm:grid-cols-3">{summaryCards.map(([name, rows]) => <div key={name} className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-xl"><div className="text-label-sm text-text-secondary">{name}</div><div className="mt-md text-heading text-text-primary">৳{rows.reduce((sum, payment) => sum + payment.amount, 0).toLocaleString("en-BD")}</div><div className="mt-xs text-video-title text-text-secondary">{rows.length} records</div></div>)}</section>{payments.length > 0 ? <section className="dashboard-card overflow-hidden rounded-corner-lg border border-border-primary bg-surface-bg"><div className="p-xl"><div className="text-heading text-text-primary">Payment Activity</div></div><div className="overflow-x-auto"><table className="admin-transactions-table w-full"><thead><tr><th>Tenant</th><th>Owner</th><th>Property</th><th>Amount</th><th>Due date</th><th>Payment date</th><th>Status</th></tr></thead><tbody>{payments.map((payment) => <tr key={payment.id}><td data-label="Tenant">{payment.tenant}</td><td data-label="Owner">{payment.owner}</td><td data-label="Property">{payment.property}</td><td data-label="Amount">৳{payment.amount.toLocaleString("en-BD")}</td><td data-label="Due date">{payment.due_date}</td><td data-label="Payment date">{payment.paid_at ? new Date(payment.paid_at).toLocaleDateString() : "Not paid"}</td><td data-label="Status"><Badge label={payment.status.charAt(0).toUpperCase() + payment.status.slice(1)} variant={variant(payment.status)} /></td></tr>)}</tbody></table></div></section> : null}</div>
 }

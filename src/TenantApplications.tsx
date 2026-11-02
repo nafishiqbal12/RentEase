@@ -1,214 +1,141 @@
-import { type DragEvent, type KeyboardEvent, useState } from "react"
+import { useEffect, useState } from "react"
 import { Badge, Button, InputField, TextareaField } from "@figma/astraui"
+import { supabase } from "./lib/supabase"
 
-type ApplicationStatus = "Pending" | "Approved" | "Rejected" | "Cancelled"
-
+type ApplicationStatus = "pending" | "approved" | "rejected" | "cancelled"
 type Application = {
-  id: number
+  id: string
+  property_id: string
   property: string
   location: string
-  moveIn: string
-  submitted: string
+  move_in_date: string
+  created_at: string
   status: ApplicationStatus
 }
 
-const initialApplications: Application[] = [
-  {
-    id: 1,
-    property: "Sunlit Furnished Apartment",
-    location: "Dhanmondi, Dhaka",
-    moveIn: "01 Nov 2025",
-    submitted: "24 Oct 2025",
-    status: "Pending",
-  },
-  {
-    id: 2,
-    property: "Modern Lakeview Residence",
-    location: "Gulshan 2, Dhaka",
-    moveIn: "15 Oct 2025",
-    submitted: "03 Oct 2025",
-    status: "Approved",
-  },
-  {
-    id: 3,
-    property: "Quiet Family Home",
-    location: "Uttara, Dhaka",
-    moveIn: "01 Sep 2025",
-    submitted: "18 Aug 2025",
-    status: "Rejected",
-  },
-  {
-    id: 4,
-    property: "Compact City Apartment",
-    location: "Banani, Dhaka",
-    moveIn: "10 Aug 2025",
-    submitted: "26 Jul 2025",
-    status: "Cancelled",
-  },
-]
+function statusLabel(status: ApplicationStatus) {
+  return status.charAt(0).toUpperCase() + status.slice(1)
+}
 
-function applicationVariant(status: ApplicationStatus) {
-  if (status === "Approved") return "success" as const
-  if (status === "Rejected") return "danger" as const
-  if (status === "Cancelled") return "secondary" as const
+function statusVariant(status: ApplicationStatus) {
+  if (status === "approved") return "success" as const
+  if (status === "rejected") return "danger" as const
+  if (status === "cancelled") return "secondary" as const
   return "warning" as const
 }
 
 function ApplyForm({
+  tenantId,
+  propertyId,
   onBack,
-  onSubmit,
+  onSubmitted,
 }: {
+  tenantId: string
+  propertyId: string
   onBack: () => void
-  onSubmit: (application: Application) => void
+  onSubmitted: () => void
 }) {
+  const [property, setProperty] = useState<{ title: string; address: string; city: string } | null>(null)
   const [moveIn, setMoveIn] = useState("")
   const [occupants, setOccupants] = useState("1")
   const [occupation, setOccupation] = useState("")
   const [message, setMessage] = useState("")
-  const [documentName, setDocumentName] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState(false)
 
-  const useDocument = (files: FileList | File[]) => {
-    const file = Array.from(files).find(
-      (item) =>
-        item.type === "application/pdf" || item.type.startsWith("image/"),
-    )
-    if (file) setDocumentName(file.name)
-  }
-
-  const browseDocument = async () => {
-    const picker = (window as Window & {
-      showOpenFilePicker?: (options: {
-        multiple: boolean
-        types: Array<{
-          description: string
-          accept: Record<string, string[]>
-        }>
-      }) => Promise<Array<{ getFile: () => Promise<File> }>>
-    }).showOpenFilePicker
-    if (!picker) return
-
-    try {
-      const handles = await picker({
-        multiple: false,
-        types: [
-          {
-            description: "Identity document",
-            accept: {
-              "application/pdf": [".pdf"],
-              "image/*": [".jpg", ".jpeg", ".png"],
-            },
-          },
-        ],
+  useEffect(() => {
+    let active = true
+    void supabase
+      .from("properties")
+      .select("title, address, city")
+      .eq("id", propertyId)
+      .eq("status", "approved")
+      .single()
+      .then(({ data, error: queryError }) => {
+        if (!active) return
+        if (queryError) setError(`Unable to load this property: ${queryError.message}`)
+        else setProperty(data)
+        setLoading(false)
       })
-      useDocument(await Promise.all(handles.map((handle) => handle.getFile())))
-    } catch {
-      // Closing the system picker is an expected no-op.
+    return () => {
+      active = false
     }
-  }
+  }, [propertyId])
 
-  const dropDocument = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    useDocument(event.dataTransfer.files)
-  }
-
-  const handleDropzoneKey = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault()
-      browseDocument()
+  const submit = async () => {
+    if (!moveIn || Number(occupants) < 1) {
+      setError("Choose a move-in date and enter at least one occupant.")
+      return
     }
-  }
-
-  const submit = () => {
-    onSubmit({
-      id: Date.now(),
-      property: "Sunlit Furnished Apartment",
-      location: "Dhanmondi, Dhaka",
-      moveIn: moveIn || "Date not selected",
-      submitted: "Today",
-      status: "Pending",
+    setSubmitting(true)
+    setError(null)
+    const { error: insertError } = await supabase.from("applications").insert({
+      tenant_id: tenantId,
+      property_id: propertyId,
+      move_in_date: moveIn,
+      occupants: Number(occupants),
+      occupation: occupation.trim() || null,
+      message: message.trim() || null,
+      status: "pending",
     })
+    setSubmitting(false)
+    if (insertError) {
+      setError(
+        insertError.code === "23505"
+          ? "You have already applied for this property."
+          : `Unable to submit application: ${insertError.message}`,
+      )
+      return
+    }
+    setSuccess(true)
+  }
+
+  if (loading) {
+    return <div className="p-2xl text-label-sm text-text-secondary">Loading property...</div>
+  }
+  if (success) {
+    return (
+      <div className="flex min-h-full items-center justify-center p-xl md:p-2xl">
+        <div className="dashboard-card w-full rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center">
+          <Badge label="Submitted" variant="success" />
+          <div className="mt-xl text-title text-text-primary">Application submitted</div>
+          <div className="mt-md text-label-sm text-text-secondary">
+            The owner will review your application.
+          </div>
+          <Button variant="primary" className="mt-2xl" onClick={onSubmitted}>
+            View my applications
+          </Button>
+        </div>
+      </div>
+    )
+  }
+  if (!property) {
+    return <div className="p-2xl text-label-sm text-danger" role="alert">{error}</div>
   }
 
   return (
     <div className="rent-page-content flex flex-col gap-2xl p-xl md:p-2xl">
       <div>
-        <Button variant="subtle" size="small" onClick={onBack}>
-          Back to applications
-        </Button>
+        <Button variant="subtle" size="small" onClick={onBack}>Back to applications</Button>
         <div className="mt-lg text-title text-text-primary">Apply to rent</div>
         <div className="mt-xs text-label-sm text-text-secondary">
-          Sunlit Furnished Apartment · Dhanmondi, Dhaka
+          {property.title} · {property.address}, {property.city}
         </div>
       </div>
-
       <div className="application-form dashboard-card w-full rounded-corner-lg border border-border-primary bg-surface-bg p-xl md:p-2xl">
         <div className="flex flex-col gap-xl">
-          <InputField
-            type="date"
-            label="Preferred move-in date"
-            value={moveIn}
-            onChange={setMoveIn}
-          />
-          <InputField
-            type="number"
-            label="Number of occupants"
-            value={occupants}
-            onChange={setOccupants}
-          />
-          <InputField
-            label="Occupation"
-            placeholder="e.g. Product Designer"
-            value={occupation}
-            onChange={setOccupation}
-          />
-          <TextareaField
-            label="Message to the owner"
-            description="Briefly introduce yourself and explain why this home is a good fit."
-            placeholder="Write a short message"
-            rows={5}
-            value={message}
-            onChange={setMessage}
-          />
-
-          <div>
-            <div className="mb-lg text-label text-text-primary">
-              ID document
-            </div>
-            <div
-              className="document-dropzone flex cursor-pointer flex-col items-center justify-center rounded-corner-lg border border-border-selected bg-bg-faint p-2xl text-center focus-visible:outline-2 focus-visible:outline-brand-primary focus-visible:outline-offset-2"
-              role="button"
-              tabIndex={0}
-              onClick={browseDocument}
-              onKeyDown={handleDropzoneKey}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={dropDocument}
-            >
-              <div className="text-label-sm text-text-primary">
-                {documentName || "Drop your NID or passport here"}
-              </div>
-              <div className="mt-xs text-video-title text-text-secondary">
-                PDF, JPG, or PNG
-              </div>
-              <Button
-                type="button"
-                variant="neutral"
-                size="small"
-                className="mt-lg"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  browseDocument()
-                }}
-              >
-                Choose document
-              </Button>
-            </div>
-          </div>
-
+          <InputField type="date" label="Preferred move-in date" value={moveIn} onChange={setMoveIn} />
+          <InputField type="number" label="Number of occupants" value={occupants} onChange={setOccupants} />
+          <InputField label="Occupation" placeholder="e.g. Product Designer" value={occupation} onChange={setOccupation} />
+          <TextareaField label="Message to the owner" description="Briefly introduce yourself and explain why this home is a good fit." placeholder="Write a short message" rows={5} value={message} onChange={setMessage} />
           <div className="flex justify-end border-t border-border-secondary pt-xl">
-            <Button variant="primary" onClick={submit}>
-              Submit application
+            <Button variant="primary" disabled={submitting} onClick={() => void submit()}>
+              {submitting ? "Submitting..." : "Submit application"}
             </Button>
           </div>
+          {error ? <div className="text-label-sm text-danger" role="alert">{error}</div> : null}
         </div>
       </div>
     </div>
@@ -216,81 +143,96 @@ function ApplyForm({
 }
 
 export default function TenantApplications({
+  tenantId,
+  initialPropertyId,
   initialView = "list",
 }: {
+  tenantId: string
+  initialPropertyId?: string | null
   initialView?: "list" | "apply"
 }) {
   const [view, setView] = useState(initialView)
-  const [applications, setApplications] = useState(initialApplications)
+  const [propertyId, setPropertyId] = useState(initialPropertyId ?? null)
+  const [applications, setApplications] = useState<Application[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const addApplication = (application: Application) => {
-    setApplications((current) => [application, ...current])
-    setView("list")
-  }
+  useEffect(() => {
+    setPropertyId(initialPropertyId ?? null)
+    if (initialPropertyId) setView("apply")
+  }, [initialPropertyId])
 
-  if (view === "apply") {
+  useEffect(() => {
+    let active = true
+    void supabase
+      .from("applications")
+      .select("id, property_id, move_in_date, created_at, status, properties(title, address, city)")
+      .eq("tenant_id", tenantId)
+      .order("created_at", { ascending: false })
+      .then(({ data, error: queryError }) => {
+        if (!active) return
+        if (queryError) setError(`Unable to load applications: ${queryError.message}`)
+        else {
+          setApplications(
+            (data ?? []).map((item) => {
+              const property = Array.isArray(item.properties) ? item.properties[0] : item.properties
+              return {
+                id: item.id,
+                property_id: item.property_id,
+                property: property?.title ?? "Property",
+                location: property ? `${property.address}, ${property.city}` : "Location unavailable",
+                move_in_date: item.move_in_date,
+                created_at: item.created_at,
+                status: item.status,
+              }
+            }),
+          )
+        }
+        setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [tenantId])
+
+  if (view === "apply" && propertyId) {
     return (
-      <ApplyForm onBack={() => setView("list")} onSubmit={addApplication} />
+      <ApplyForm
+        tenantId={tenantId}
+        propertyId={propertyId}
+        onBack={() => setView("list")}
+        onSubmitted={() => {
+          setView("list")
+          setPropertyId(null)
+        }}
+      />
     )
   }
 
   return (
     <div className="rent-page-content flex flex-col gap-2xl p-xl md:p-2xl">
-      <div className="flex flex-col gap-xl sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="text-title text-text-primary">My Applications</div>
-          <div className="mt-xs text-label-sm text-text-secondary">
-            Track your rental applications and owner decisions.
-          </div>
-        </div>
-        <Button variant="primary" onClick={() => setView("apply")}>
-          Apply to rent
-        </Button>
+      <div>
+        <div className="text-title text-text-primary">My Applications</div>
+        <div className="mt-xs text-label-sm text-text-secondary">Track your rental applications and owner decisions.</div>
       </div>
-
+      {loading ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">Loading applications...</div> : null}
+      {error ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-danger" role="alert">{error}</div> : null}
+      {!loading && !error && applications.length === 0 ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">You have not submitted any applications yet. Apply from Search Properties.</div> : null}
       <div className="flex flex-col gap-xl">
         {applications.map((application) => (
-          <article
-            key={application.id}
-            className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-xl"
-          >
+          <article key={application.id} className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-xl">
             <div className="flex flex-col gap-xl sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <div className="flex flex-wrap items-center gap-md">
-                  <div className="text-heading text-text-primary">
-                    {application.property}
-                  </div>
-                  <Badge
-                    label={application.status}
-                    variant={applicationVariant(application.status)}
-                  />
+                  <div className="text-heading text-text-primary">{application.property}</div>
+                  <Badge label={statusLabel(application.status)} variant={statusVariant(application.status)} />
                 </div>
-                <div className="mt-xs text-label-sm text-text-secondary">
-                  {application.location}
-                </div>
+                <div className="mt-xs text-label-sm text-text-secondary">{application.location}</div>
                 <div className="mt-lg flex flex-wrap gap-xl text-video-title text-text-secondary">
-                  <span>Move-in: {application.moveIn}</span>
-                  <span>Submitted: {application.submitted}</span>
+                  <span>Move-in: {application.move_in_date}</span>
+                  <span>Submitted: {new Date(application.created_at).toLocaleDateString()}</span>
                 </div>
               </div>
-              {application.status === "Pending" ? (
-                <Button
-                  variant="neutral"
-                  size="small"
-                  className="application-cancel-button"
-                  onClick={() =>
-                    setApplications((current) =>
-                      current.map((item) =>
-                        item.id === application.id
-                          ? { ...item, status: "Cancelled" }
-                          : item,
-                      ),
-                    )
-                  }
-                >
-                  Cancel application
-                </Button>
-              ) : null}
             </div>
           </article>
         ))}

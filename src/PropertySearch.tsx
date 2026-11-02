@@ -435,9 +435,9 @@ function SearchResults({
   const [location, setLocation] = useState("Dhanmondi, Dhaka")
   const [view, setView] = useState<"list" | "map">("list")
   const [sort, setSort] = useState("recommended")
-  const [savedIds, setSavedIds] = useState<number[]>([2])
+  const [savedIds, setSavedIds] = useState<Array<string | number>>([2])
 
-  const toggleSaved = (id: number) => {
+  const toggleSaved = (id: string | number) => {
     setSavedIds((current) =>
       current.includes(id)
         ? current.filter((savedId) => savedId !== id)
@@ -573,7 +573,7 @@ function PropertyDetails({
 }: {
   property: Property
   onBack: () => void
-  onApply?: () => void
+  onApply?: (propertyId: string) => void
 }) {
   return (
     <div className="rent-page-content flex flex-col gap-xl p-xl md:p-2xl">
@@ -766,7 +766,7 @@ function PropertyDetails({
               <span className="text-text-primary">01 November</span>
             </div>
           </div>
-          <Button variant="primary" className="mt-xl w-full" onClick={onApply}>
+          <Button variant="primary" className="mt-xl w-full" onClick={() => onApply?.(String(property.id))}>
             Apply to rent
           </Button>
           <Button variant="neutral" className="mt-md w-full">
@@ -781,7 +781,7 @@ function PropertyDetails({
   )
 }
 
-export default function PropertySearch({ onApply }: { onApply?: () => void }) {
+export default function PropertySearch({ onApply }: { onApply?: (propertyId: string) => void }) {
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(
     null,
   )

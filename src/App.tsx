@@ -66,7 +66,7 @@ type RegistrationRole = "Tenant" | "Owner"
 type WorkspaceRole = RegistrationRole | "Admin"
 type LoginErrors = Partial<Record<"email" | "password", string>>
 type RegisterErrors = Partial<Record<"role" | "fullName" | "email" | "phone" | "password" | "confirmPassword" | "terms", string>>
-type AuthMessage = { type: "error" | "success" text: string } | null
+type AuthMessage = { type: "error" | "success"; text: string } | null
 type Profile = {
   id: string
   full_name: string
@@ -180,7 +180,7 @@ function Brand({
   )
 }
 
-function FieldError({ id, message }: { id: string message?: string }) {
+function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null
 
   return (
@@ -806,106 +806,211 @@ function AuthScreen({
 
 function TenantDashboard({
   onNavigate,
+  tenantId,
 }: {
   onNavigate: (destination: string) => void
+  tenantId: string
 }) {
+  type TenantLease = {
+    id: string
+    monthly_rent: number
+    start_date: string
+    end_date: string
+    status: string
+    property: {
+      title: string
+      address: string
+      city: string
+      property_type: string
+      image_urls: string[]
+    } | null
+  }
+  type TenantPayment = {
+    id: string
+    amount: number
+    due_date: string
+    paid_at: string | null
+    status: string
+  }
+  type TenantRequest = {
+    id: string
+    title: string
+    created_at: string
+    status: string
+  }
+  type TenantComplaint = {
+    id: string
+    subject: string
+    created_at: string
+    status: string
+  }
+
+  const [lease, setLease] = useState<TenantLease | null>(null)
+  const [payments, setPayments] = useState<TenantPayment[]>([])
+  const [applications, setApplications] = useState<
+    Array<{ id: string; property: string; status: string }>
+  >([])
+  const [requests, setRequests] = useState<TenantRequest[]>([])
+  const [complaints, setComplaints] = useState<TenantComplaint[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    const loadDashboard = async () => {
+      const [leaseResult, applicationResult, requestResult, complaintResult] =
+        await Promise.all([
+          supabase
+            .from("leases")
+            .select(
+              "id, monthly_rent, start_date, end_date, status, properties(title, address, city, property_type, image_urls)",
+            )
+            .eq("tenant_id", tenantId)
+            .in("status", ["active", "draft"])
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from("applications")
+            .select("id, status, properties(title)")
+            .eq("tenant_id", tenantId)
+            .order("created_at", { ascending: false })
+            .limit(5),
+          supabase
+            .from("maintenance_requests")
+            .select("id, title, created_at, status")
+            .eq("tenant_id", tenantId)
+            .order("created_at", { ascending: false })
+            .limit(3),
+          supabase
+            .from("complaints")
+            .select("id, subject, created_at, status")
+            .eq("tenant_id", tenantId)
+            .order("created_at", { ascending: false })
+            .limit(3),
+        ])
+
+      if (!active) return
+      const queryError = [
+        leaseResult.error,
+        applicationResult.error,
+        requestResult.error,
+        complaintResult.error,
+      ].find(Boolean)
+      if (queryError) {
+        setError(`Unable to load your dashboard: ${queryError.message}`)
+        setLoading(false)
+        return
+      }
+
+      const leaseData = leaseResult.data
+      const property = leaseData?.properties
+        ? Array.isArray(leaseData.properties)
+          ? leaseData.properties[0]
+          : leaseData.properties
+        : null
+      const currentLease = leaseData
+        ? { ...leaseData, property }
+        : null
+      setLease(currentLease)
+      setApplications(
+        (applicationResult.data ?? []).map((application) => {
+          const applicationProperty = Array.isArray(application.properties)
+            ? application.properties[0]
+            : application.properties
+          return {
+            id: application.id,
+            property: applicationProperty?.title ?? "Property",
+            status: application.status,
+          }
+        }),
+      )
+      setRequests(requestResult.data ?? [])
+      setComplaints(complaintResult.data ?? [])
+
+      if (currentLease) {
+        const { data: paymentData, error: paymentError } = await supabase
+          .from("payments")
+          .select("id, amount, due_date, paid_at, status")
+          .eq("tenant_id", tenantId)
+          .eq("lease_id", currentLease.id)
+          .order("due_date", { ascending: false })
+          .limit(5)
+        if (!active) return
+        if (paymentError) {
+          setError(`Unable to load payment history: ${paymentError.message}`)
+        } else {
+          setPayments(paymentData ?? [])
+        }
+      }
+      setLoading(false)
+    }
+
+    void loadDashboard()
+    return () => {
+      active = false
+    }
+  }, [tenantId])
+
+  const outstandingPayment = payments.find((payment) => payment.status !== "paid")
+  const openRequests = requests.filter((request) => request.status !== "completed")
+  const nextPaymentDate = outstandingPayment?.due_date
+    ? new Date(`${outstandingPayment.due_date}T00:00:00`).toLocaleDateString(
+        "en-GB",
+        { day: "2-digit", month: "short" },
+      )
+    : "—"
+  const daysUntilPayment = outstandingPayment?.due_date
+    ? Math.max(
+        0,
+        Math.ceil(
+          (new Date(`${outstandingPayment.due_date}T00:00:00`).getTime() -
+            Date.now()) /
+            86400000,
+        ),
+      )
+    : null
   const stats = [
     {
       label: "Monthly Rent",
-      value: "৳18,000",
-      detail: "Due every month",
+      value: lease ? `৳${Number(lease.monthly_rent).toLocaleString("en-BD")}` : "—",
+      detail: lease ? "Due every month" : "No lease yet",
       icon: CircleDollarSign,
       tone: "brand",
       destination: "Payments",
     },
     {
       label: "Next Payment",
-      value: "05 Nov",
-      detail: "23 days remaining",
+      value: nextPaymentDate,
+      detail: daysUntilPayment === null ? "No outstanding payment" : `${daysUntilPayment} days remaining`,
       icon: CalendarClock,
       tone: "info",
       destination: "Payments",
     },
     {
       label: "Open Requests",
-      value: "2",
-      detail: "1 update today",
+      value: String(openRequests.length),
+      detail: requests.length ? `${requests.length} total requests` : "No requests",
       icon: Wrench,
       tone: "warning",
       destination: "Maintenance",
     },
     {
       label: "Agreement Expiry",
-      value: "103 days",
-      detail: "Ends 24 Jan 2027",
+      value: lease ? new Date(lease.end_date).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—",
+      detail: lease ? `Status: ${lease.status}` : "No active lease",
       icon: FileCheck2,
       tone: "accent",
       destination: "Agreement",
     },
   ]
 
-  const requests = [
-    {
-      title: "Leaking kitchen tap",
-      date: "Reported 12 Oct",
-      status: "In Progress",
-      variant: "warning" as const,
-      icon: Wrench,
-    },
-    {
-      title: "Bedroom AC servicing",
-      date: "Reported 10 Oct",
-      status: "Assigned",
-      variant: "brand" as const,
-      icon: Building2,
-    },
-    {
-      title: "Switch not working",
-      date: "Reported 06 Oct",
-      status: "Pending",
-      variant: "secondary" as const,
-      icon: Lightbulb,
-    },
-  ]
-
-  const payments = [
-    {
-      month: "October 2026",
-      amount: "৳18,000",
-      paidOn: "05 Oct 2026",
-      status: "Paid",
-      variant: "success" as const,
-    },
-    {
-      month: "September 2026",
-      amount: "৳18,000",
-      paidOn: "04 Sep 2026",
-      status: "Paid",
-      variant: "success" as const,
-    },
-    {
-      month: "August 2026",
-      amount: "৳18,000",
-      paidOn: "05 Aug 2026",
-      status: "Paid",
-      variant: "success" as const,
-    },
-    {
-      month: "July 2026",
-      amount: "৳18,000",
-      paidOn: "Pending",
-      status: "Pending",
-      variant: "warning" as const,
-    },
-    {
-      month: "June 2026",
-      amount: "৳18,000",
-      paidOn: "Overdue",
-      status: "Overdue",
-      variant: "danger" as const,
-    },
-  ]
-
+  if (loading) {
+    return <div className="rent-dashboard-content p-xl md:p-2xl"><div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">Loading your dashboard...</div></div>
+  }
+  if (error) {
+    return <div className="rent-dashboard-content p-xl md:p-2xl"><div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-danger" role="alert">{error}</div></div>
+  }
   return (
     <div className="rent-dashboard-content flex flex-col gap-2xl p-xl md:p-2xl">
       <div className="dashboard-welcome relative overflow-hidden rounded-corner-lg border border-border-primary p-xl md:p-2xl">
@@ -917,7 +1022,7 @@ function TenantDashboard({
         />
         <div className="dashboard-welcome-copy relative">
           <div className="text-title text-text-primary">
-            Welcome back, Tanvir 👋
+            Welcome back 👋
           </div>
           <div className="mt-xs text-label-sm text-text-secondary">
             Here is what is happening with your rental. Keep everything on
@@ -984,35 +1089,16 @@ function TenantDashboard({
               <ChevronRight size={16} />
             </Button>
           </div>
-          <div className="current-property-layout p-xl">
-            <img
-              className="dashboard-property-image w-full rounded-corner-md object-cover"
-              src={dashboardPropertyImage}
-              alt="Furnished apartment living room in Dhanmondi"
-            />
+          {lease ? <div className="current-property-layout p-xl">
+            <img className="dashboard-property-image w-full rounded-corner-md object-cover" src={lease.property?.image_urls?.[0] || dashboardPropertyImage} alt={lease.property?.title ?? "Current property"} />
             <div>
-              <div className="text-heading text-text-primary">
-                Green View Apartment
-              </div>
-              <div className="mt-md flex items-center gap-md text-label-sm text-text-secondary">
-                <MapPin size={16} />
-                Dhanmondi Dhaka
-              </div>
-              <div className="mt-lg flex items-center gap-md text-label-sm text-text-primary">
-                <House size={16} className="text-brand-primary" />
-                Apartment
-              </div>
-              <div className="mt-lg flex items-center gap-md text-label-sm text-text-primary">
-                <CircleDollarSign size={16} className="text-brand-primary" />
-                Monthly rent:
-                <span className="text-label text-text-primary">৳18,000</span>
-              </div>
-              <div className="mt-lg flex items-center gap-md text-label-sm text-text-primary">
-                <FileCheck2 size={16} className="text-brand-primary" />
-                Status: <Badge label="Rented" variant="success" />
-              </div>
+              <div className="text-heading text-text-primary">{lease.property?.title ?? "Current property"}</div>
+              <div className="mt-md flex items-center gap-md text-label-sm text-text-secondary"><MapPin size={16} />{lease.property ? `${lease.property.address}, ${lease.property.city}` : "Address unavailable"}</div>
+              <div className="mt-lg flex items-center gap-md text-label-sm text-text-primary"><House size={16} className="text-brand-primary" />{lease.property?.property_type ?? "Property"}</div>
+              <div className="mt-lg flex items-center gap-md text-label-sm text-text-primary"><CircleDollarSign size={16} className="text-brand-primary" />Monthly rent: <span className="text-label text-text-primary">৳{Number(lease.monthly_rent).toLocaleString("en-BD")}</span></div>
+              <div className="mt-lg flex items-center gap-md text-label-sm text-text-primary"><FileCheck2 size={16} className="text-brand-primary" />Status: <Badge label={lease.status.charAt(0).toUpperCase() + lease.status.slice(1)} variant={lease.status === "active" ? "success" : "warning"} /></div>
             </div>
-          </div>
+          </div> : <div className="p-xl text-label-sm text-text-secondary">No current lease. Applications: {applications.length ? applications.map((application) => `${application.property} (${application.status})`).join(", ") : "none"}.</div>}
         </section>
 
         <section
@@ -1038,30 +1124,30 @@ function TenantDashboard({
           </div>
 
           <div className="mt-xl flex flex-col">
-            {requests.map((request) => (
+            {requests.length ? requests.map((request) => (
               <div
                 key={request.title}
                 className="maintenance-row flex items-center justify-between gap-lg border-b border-border-secondary py-lg"
               >
                 <div className="flex min-w-0 items-center gap-lg">
                   <div className="maintenance-icon flex shrink-0 items-center justify-center rounded-corner-md bg-brand-muted text-brand-primary">
-                    <request.icon size={18} />
+                    <Wrench size={18} />
                   </div>
                   <div className="min-w-0">
                     <div className="text-label-sm text-text-primary">
                       {request.title}
                     </div>
                     <div className="mt-xs text-video-title text-text-secondary">
-                      {request.date}
+                      {new Date(request.created_at).toLocaleDateString()}
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-md">
                   <Badge
-                    label={request.status}
-                    variant={request.variant}
+                    label={request.status.replace(/_/g, " ")}
+                    variant={request.status === "completed" ? "success" : "warning"}
                     className={
-                      request.status === "Assigned"
+                      request.status === "assigned"
                         ? "status-assigned"
                         : undefined
                     }
@@ -1069,10 +1155,61 @@ function TenantDashboard({
                   <ChevronRight size={16} className="text-text-tertiary" />
                 </div>
               </div>
-            ))}
+            )) : <div className="py-lg text-label-sm text-text-secondary">No maintenance requests yet.</div>}
           </div>
         </section>
       </div>
+
+      <section
+        className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-xl"
+        aria-label="Complaints"
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-heading text-text-primary">Complaints</div>
+            <div className="mt-xs text-video-title text-text-secondary">
+              Track issues raised with RentEase.
+            </div>
+          </div>
+          <Button
+            variant="subtle"
+            size="small"
+            onClick={() => onNavigate("Complaints")}
+          >
+            View all
+          </Button>
+        </div>
+        <div className="mt-xl flex flex-col gap-lg">
+          {complaints.length ? (
+            complaints.map((complaint) => (
+              <div
+                key={complaint.id}
+                className="flex items-center justify-between gap-lg border-b border-border-secondary pb-lg last:border-b-0 last:pb-0"
+              >
+                <div>
+                  <div className="text-label-sm text-text-primary">
+                    {complaint.subject}
+                  </div>
+                  <div className="mt-xs text-video-title text-text-secondary">
+                    Submitted{" "}
+                    {new Date(complaint.created_at).toLocaleDateString()}
+                  </div>
+                </div>
+                <Badge
+                  label={complaint.status.replace(/_/g, " ")}
+                  variant={
+                    complaint.status === "resolved" ? "success" : "warning"
+                  }
+                />
+              </div>
+            ))
+          ) : (
+            <div className="text-label-sm text-text-secondary">
+              No complaints submitted yet.
+            </div>
+          )}
+        </div>
+      </section>
 
       <section
         className="dashboard-card overflow-hidden rounded-corner-lg border border-border-primary bg-surface-bg"
@@ -1110,13 +1247,13 @@ function TenantDashboard({
               </tr>
             </thead>
             <tbody>
-              {payments.map((payment) => (
-                <tr key={payment.month}>
-                  <td data-label="Month">{payment.month}</td>
-                  <td data-label="Amount">{payment.amount}</td>
-                  <td data-label="Payment date">{payment.paidOn}</td>
+              {payments.length ? payments.map((payment) => (
+                <tr key={payment.id}>
+                  <td data-label="Month">{new Date(`${payment.due_date}T00:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}</td>
+                  <td data-label="Amount">৳{Number(payment.amount).toLocaleString("en-BD")}</td>
+                  <td data-label="Payment date">{payment.paid_at ? new Date(payment.paid_at).toLocaleDateString() : "Not paid"}</td>
                   <td data-label="Status">
-                    <Badge label={payment.status} variant={payment.variant} />
+                    <Badge label={payment.status.charAt(0).toUpperCase() + payment.status.slice(1)} variant={payment.status === "paid" ? "success" : payment.status === "overdue" ? "danger" : "warning"} />
                   </td>
                   <td data-label="Action">
                     <Button
@@ -1124,13 +1261,13 @@ function TenantDashboard({
                       variant="subtle"
                       size="small"
                       iconStart={<Download size={16} />}
-                      aria-label={`Download receipt for ${payment.month}`}
+                      aria-label={`Download receipt for ${payment.due_date}`}
                     >
                       Download
                     </Button>
                   </td>
                 </tr>
-              ))}
+              )) : <tr><td colSpan={5} className="p-xl text-center text-label-sm text-text-secondary">No payment history yet.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1153,6 +1290,7 @@ function RentEaseShell({
         ? "Owner"
         : "Tenant"
   const [activeNav, setActiveNav] = useState("Dashboard")
+  const [applicationPropertyId, setApplicationPropertyId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
   const navigation = navigationByRole[role]
@@ -1312,22 +1450,31 @@ function RentEaseShell({
           aria-label={`${role} workspace`}
         >
           {role === "Tenant" && activeNav === "Dashboard" ? (
-            <TenantDashboard onNavigate={setActiveNav} />
+            <TenantDashboard onNavigate={setActiveNav} tenantId={profile.id} />
           ) : null}
           {role === "Tenant" && activeNav === "Search Properties" ? (
-            <PropertySearch onApply={() => setActiveNav("Apply to Rent")} />
+            <PropertySearch
+              onApply={(propertyId) => {
+                setApplicationPropertyId(propertyId)
+                setActiveNav("Apply to Rent")
+              }}
+            />
           ) : null}
           {role === "Tenant" && activeNav === "My Applications" ? (
-            <TenantApplications />
+            <TenantApplications tenantId={profile.id} />
           ) : null}
           {role === "Tenant" && activeNav === "Apply to Rent" ? (
-            <TenantApplications initialView="apply" />
+            <TenantApplications
+              tenantId={profile.id}
+              initialPropertyId={applicationPropertyId}
+              initialView="apply"
+            />
           ) : null}
           {role === "Tenant" && activeNav === "Agreement" ? (
-            <AgreementScreen role="Tenant" />
+            <AgreementScreen role="Tenant" userId={profile.id} />
           ) : null}
           {role === "Tenant" && activeNav === "Payments" ? (
-            <TenantPayments />
+            <TenantPayments tenantId={profile.id} />
           ) : null}
           {role === "Tenant" && activeNav === "Maintenance" ? (
             <TenantMaintenance />
@@ -1346,19 +1493,19 @@ function RentEaseShell({
           ) : null}
           {activeNav === "Profile" ? <ProfileScreen role={role} /> : null}
           {role === "Owner" && activeNav === "Dashboard" ? (
-            <OwnerDashboard />
+            <OwnerDashboard ownerId={profile.id} />
           ) : null}
           {role === "Owner" && activeNav === "My Properties" ? (
             <OwnerProperties ownerId={profile.id} />
           ) : null}
           {role === "Owner" && activeNav === "Applications" ? (
-            <OwnerApplications />
+            <OwnerApplications ownerId={profile.id} />
           ) : null}
           {role === "Owner" && activeNav === "Agreements" ? (
-            <AgreementScreen role="Owner" />
+            <AgreementScreen role="Owner" userId={profile.id} />
           ) : null}
           {role === "Owner" && activeNav === "Rent Tracking" ? (
-            <OwnerRentTracking />
+            <OwnerRentTracking ownerId={profile.id} />
           ) : null}
           {role === "Owner" && activeNav === "Maintenance" ? (
             <OwnerMaintenance />
@@ -1370,13 +1517,13 @@ function RentEaseShell({
             <NotificationsScreen role="Owner" />
           ) : null}
           {role === "Owner" && activeNav === "Reports" ? (
-            <AdminReports scope="Owner" />
+            <AdminReports scope="Owner" ownerId={profile.id} />
           ) : null}
           {role === "Admin" && activeNav === "Dashboard" ? (
-            <AdminDashboard />
+            <AdminDashboard adminId={profile.id} />
           ) : null}
           {role === "Admin" && activeNav === "Property Verification" ? (
-            <AdminDashboard queueOnly />
+            <AdminDashboard adminId={profile.id} queueOnly />
           ) : null}
           {role === "Admin" && activeNav === "Complaints" ? (
             <ComplaintsScreen role="Admin" />
@@ -1508,6 +1655,8 @@ export default function App() {
     if (error) throw new Error(error.message)
     if (!data.session)
       throw new Error("Your email must be confirmed before logging in.")
+    if (!data.user) throw new Error("Login succeeded but the user session is unavailable.")
+    if (!data.user) throw new Error("Account was created but the user session is unavailable.")
     await loadProfile(data.user.id)
   }
 
@@ -1530,6 +1679,7 @@ export default function App() {
       })
       return false
     }
+    if (!data.user) throw new Error("Account was created but the user session is unavailable.")
     await loadProfile(data.user.id)
     return true
   }
@@ -1555,8 +1705,8 @@ export default function App() {
         <RentEaseShell profile={profile} onLogout={logout} />
       ) : (
         <AuthScreen
-          view={view}
-          onChangeView={setView}
+          view={view === "workspace" ? "login" : view}
+          onChangeView={(nextView) => setView(nextView)}
           onLogin={login}
           onRegister={register}
         />
