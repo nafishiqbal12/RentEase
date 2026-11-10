@@ -284,6 +284,7 @@ async function main() {
       property_type: type,
       address: `Road ${(index % 12) + 1}, ${area}, Dhaka`,
       city: "Dhaka",
+      area,
       bedrooms: 1 + (index % 4),
       bathrooms: 1 + (index % 3),
       size_sq_ft: 650 + (index % 8) * 150,
