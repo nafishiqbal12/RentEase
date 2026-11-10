@@ -14,6 +14,7 @@ type Property = {
   title: string
   address: string
   city: string
+  area: string | null
   description: string | null
   monthlyRent: number
   securityDeposit: number | null
@@ -109,6 +110,7 @@ function mapProperty(row: {
   title: string
   address: string
   city: string
+  area: string | null
   description: string | null
   monthly_rent: number | string
   security_deposit: number | string | null
@@ -126,6 +128,7 @@ function mapProperty(row: {
     title: row.title,
     address: row.address,
     city: row.city,
+    area: row.area,
     description: row.description,
     monthlyRent: Number(row.monthly_rent),
     securityDeposit:
@@ -310,12 +313,16 @@ function FilterPanel({
           <InputField
             label="Minimum"
             type="number"
+            prefix="৳"
+            placeholder="Min"
             value={filters.minimumRent}
             onChange={(value) => onChange("minimumRent", value)}
           />
           <InputField
             label="Maximum"
             type="number"
+            prefix="৳"
+            placeholder="Max"
             value={filters.maximumRent}
             onChange={(value) => onChange("maximumRent", value)}
           />
@@ -444,6 +451,7 @@ function SearchResults({
       return (
         (!keyword || searchable.includes(keyword)) &&
         (filters.area === "Any" ||
+          property.area === filters.area ||
           property.address
             .toLowerCase()
             .includes(filters.area.toLowerCase())) &&
@@ -528,18 +536,20 @@ function SearchResults({
           Find a verified home that fits your life.
         </div>
       </div>
-      <div className="dashboard-card flex flex-col gap-lg rounded-corner-lg border border-border-primary bg-surface-bg p-xl sm:flex-row sm:items-end">
-        <div className="flex-1">
-          <InputField
-            label="Search"
-            placeholder="Search title or address"
-            value={draftFilters.keyword}
-            onChange={(value) => changeFilter("keyword", value)}
-          />
+      <div className="dashboard-card flex flex-col gap-lg rounded-corner-lg border border-border-primary bg-surface-bg p-xl">
+        <div className="flex items-end gap-lg">
+          <div className="flex-1">
+            <InputField
+              label="Search"
+              placeholder="Search title or address"
+              value={draftFilters.keyword}
+              onChange={(value) => changeFilter("keyword", value)}
+            />
+          </div>
+          <Button variant="primary" onClick={applyFilters}>
+            Search
+          </Button>
         </div>
-        <Button variant="primary" onClick={applyFilters}>
-          Search
-        </Button>
       </div>
       {saveError ? (
         <div
@@ -853,7 +863,7 @@ export default function PropertySearch({
     const { data, error: queryError } = await supabase
       .from("properties")
       .select(
-        "id, title, address, city, description, bedrooms, bathrooms, size_sq_ft, monthly_rent, security_deposit, property_type, image_urls, amenities, availability_date, created_at",
+        "id, title, address, city, area, description, bedrooms, bathrooms, size_sq_ft, monthly_rent, security_deposit, property_type, image_urls, amenities, availability_date, created_at",
       )
       .eq("status", "approved")
       .or(`availability_date.is.null,availability_date.lte.${today}`)
@@ -894,8 +904,8 @@ export default function PropertySearch({
           reviewResults[index].error || !reviewResults[index].data?.length
             ? null
             : reviewResults[index].data.reduce(
-              (sum: number, review: { property_rating: number }) =>
-                sum + Number(review.property_rating),
+                (sum: number, review: { property_rating: number }) =>
+                  sum + Number(review.property_rating),
                 0,
               ) / reviewResults[index].data.length,
       })),
