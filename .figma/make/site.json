@@ -1,0 +1,10 @@
+{
+  "description": "Manage property rentals efficiently with role-based access for tenants, landlords, and admins, featuring real-time status updates and localized data.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
