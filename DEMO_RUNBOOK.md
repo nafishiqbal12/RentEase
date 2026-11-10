@@ -207,10 +207,10 @@ pnpm db:seed
 
 The service-role key is server-only and must never be copied into `VITE_*`
 variables or frontend code. The seed creates 30 labeled properties linked to
-the three demo Owner profile IDs, 24 approved, 3 rented, and 3 pending
-verification. Area names are included in each address because the current
-properties schema has no area column; floor and facing are included in the
-description for the same reason. Images use public `picsum.photos` URLs.
+the three demo Owner profile IDs, 21 approved, 3 rented, and 6 pending
+verification. Area names are included in each address and the `area` column.
+Floor and facing are included in the description for realistic listing
+details. Images use public Unsplash apartment and building photographs.
 
 The seed is safe to run twice: it uses deterministic IDs and upserts, and it
 does not delete data. Rerunning it reconciles only the labeled demo records; it

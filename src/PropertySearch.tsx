@@ -309,7 +309,7 @@ function FilterPanel({
       <div className="filter-section">
         <div className="mb-lg text-label text-text-primary">Area</div>
         <SelectField
-          label="Dhaka South area"
+          label="Uttara area"
           options={[
             { value: "Any", label: "Any area" },
             ...areas.map((area) => ({ value: area, label: area })),

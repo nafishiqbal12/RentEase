@@ -34,9 +34,18 @@ const PROPERTY_LABELS = [
   "Duplex",
   "Office space",
 ]
+const PROPERTY_IMAGES = [
+  "https://images.unsplash.com/photo-1757924461488-ef9ad0670978?auto=format&fit=crop&w=1200&q=85",
+  "https://images.unsplash.com/photo-1737045466261-92204d753268?auto=format&fit=crop&w=1200&q=85",
+  "https://images.unsplash.com/photo-1479839672679-a46483c0e7c8?auto=format&fit=crop&w=1200&q=85",
+  "https://images.unsplash.com/photo-1768578927019-8be9eb339fb5?auto=format&fit=crop&w=1200&q=85",
+  "https://images.unsplash.com/photo-1761783066826-689af9f13267?auto=format&fit=crop&w=1200&q=85",
+  "https://images.unsplash.com/photo-1768413292179-d958b344f1d4?auto=format&fit=crop&w=1200&q=85",
+  "https://images.unsplash.com/photo-1768413292140-0442cb61a989?auto=format&fit=crop&w=1200&q=85",
+]
 const IMAGE_URLS = (index: number) =>
-  [1, 2, 3].map(
-    (image) => `https://picsum.photos/seed/rentease-${index}-${image}/900/600`,
+  [0, 1, 2].map(
+    (offset) => PROPERTY_IMAGES[(index + offset) % PROPERTY_IMAGES.length],
   )
 const now = new Date()
 
@@ -330,7 +339,7 @@ async function main() {
   const existingProperties = await must(
     client
       .from("properties")
-      .select("id, status, verified_by, verified_at")
+      .select("id, status, verified_by, verified_at, availability_date")
       .in(
         "id",
         properties.map((property) => property.id),
@@ -349,6 +358,7 @@ async function main() {
             status: existing.status,
             verified_by: existing.verified_by,
             verified_at: existing.verified_at,
+            availability_date: existing.availability_date,
           }
         : {}),
     }
