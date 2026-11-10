@@ -224,6 +224,16 @@ export default function OwnerRentTracking({
       return matchesStatus && value.includes(search.toLowerCase().trim())
     }), [payments, paymentFilter, search])
 
+    const activateLease = async (leaseId: string) => {
+      setError(null)
+      const { error: activationError } = await supabase.rpc("activate_rental_lease", { lease_uuid: leaseId })
+      if (activationError) {
+        setError(`Unable to activate lease: ${activationError.message}`)
+        return
+      }
+      window.location.reload()
+    }
+
     const paidTotal = filteredPayments.filter((payment) => payment.status === "paid").reduce((sum, payment) => sum + payment.amount, 0)
     const outstandingTotal = filteredPayments.filter((payment) => payment.status !== "paid").reduce((sum, payment) => sum + payment.amount, 0)
 
@@ -251,7 +261,7 @@ export default function OwnerRentTracking({
           </section>
           {!leases.length ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-2xl text-center text-label-sm text-text-secondary">No lease records found.</div> : null}
           {leases.length && !filteredLeases.length ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-xl text-center text-label-sm text-text-secondary">No leases match the selected filters.</div> : null}
-          {filteredLeases.length ? <section className="dashboard-card overflow-hidden rounded-corner-lg border border-border-primary bg-surface-bg"><div className="p-xl"><div className="text-heading text-text-primary">Lease Records</div></div><div className="overflow-x-auto"><table className="rent-tracking-table w-full"><thead><tr><th>Tenant</th><th>Owner</th><th>Property</th><th>Rent</th><th>Lease dates</th><th>Status</th></tr></thead><tbody>{filteredLeases.map((lease) => <tr key={lease.id}><td data-label="Tenant">{lease.tenant}</td><td data-label="Owner">{lease.owner}</td><td data-label="Property">{lease.property}</td><td data-label="Rent">৳{lease.monthly_rent.toLocaleString("en-BD")}</td><td data-label="Lease dates">{lease.start_date} – {lease.end_date}</td><td data-label="Status"><Badge label={lease.status.charAt(0).toUpperCase() + lease.status.slice(1)} variant={paymentVariant(lease.status)} /></td></tr>)}</tbody></table></div></section> : null}
+          {filteredLeases.length ? <section className="dashboard-card overflow-hidden rounded-corner-lg border border-border-primary bg-surface-bg"><div className="p-xl"><div className="text-heading text-text-primary">Lease Records</div></div><div className="overflow-x-auto"><table className="rent-tracking-table w-full"><thead><tr><th>Tenant</th><th>Owner</th><th>Property</th><th>Rent</th><th>Lease dates</th><th>Status</th><th>Action</th></tr></thead><tbody>{filteredLeases.map((lease) => <tr key={lease.id}><td data-label="Tenant">{lease.tenant}</td><td data-label="Owner">{lease.owner}</td><td data-label="Property">{lease.property}</td><td data-label="Rent">৳{lease.monthly_rent.toLocaleString("en-BD")}</td><td data-label="Lease dates">{lease.start_date} – {lease.end_date}</td><td data-label="Status"><Badge label={lease.status.charAt(0).toUpperCase() + lease.status.slice(1)} variant={paymentVariant(lease.status)} /></td><td data-label="Action">{lease.status === "draft" ? <Button size="small" variant="primary" onClick={() => void activateLease(lease.id)}>Activate</Button> : "—"}</td></tr>)}</tbody></table></div></section> : null}
           {!payments.length ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-xl text-center text-label-sm text-text-secondary">No payment records found.</div> : null}
           {payments.length && !filteredPayments.length ? <div className="dashboard-card rounded-corner-lg border border-border-primary bg-surface-bg p-xl text-center text-label-sm text-text-secondary">No payments match the selected filters.</div> : null}
           {filteredPayments.length ? <section className="dashboard-card overflow-hidden rounded-corner-lg border border-border-primary bg-surface-bg"><div className="p-xl"><div className="text-heading text-text-primary">Payment Records</div></div><div className="overflow-x-auto"><table className="rent-tracking-table w-full"><thead><tr><th>Tenant</th><th>Owner</th><th>Property</th><th>Amount</th><th>Due date</th><th>Payment date</th><th>Status</th></tr></thead><tbody>{filteredPayments.map((payment) => <tr key={payment.id}><td data-label="Tenant">{payment.tenant}</td><td data-label="Owner">{payment.owner}</td><td data-label="Property">{payment.property}</td><td data-label="Amount">৳{payment.amount.toLocaleString("en-BD")}</td><td data-label="Due date">{payment.due_date}</td><td data-label="Payment date">{payment.paid_at ? new Date(payment.paid_at).toLocaleDateString() : "Not paid"}</td><td data-label="Status"><Badge label={payment.status.charAt(0).toUpperCase() + payment.status.slice(1)} variant={paymentVariant(payment.status)} /></td></tr>)}</tbody></table></div></section> : null}

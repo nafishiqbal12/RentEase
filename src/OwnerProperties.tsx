@@ -750,10 +750,17 @@ export default function OwnerProperties({ ownerId }: { ownerId: string }) {
     const locationParts = draft.location.split(",")
     const city = locationParts.pop()?.trim() || "Dhaka"
     const address = locationParts.join(",").trim() || city
+    const area =
+      address.match(/Uttara Sector\s+\d+/i)?.[0] ??
+      address.match(
+        /Airport|Kawla|Dakkhinkhan|Tongi|Abdullahpur|Turag|Uttarkhan|House Building|Azampur|Diabari/i,
+      )?.[0] ??
+      null
     const basePayload = {
       title: draft.title,
       address,
       city,
+      area,
       property_type: draft.propertyType,
       bedrooms: Number(draft.bedrooms),
       bathrooms: Number(draft.bathrooms),

@@ -12,28 +12,19 @@ type Account = {
 type MustResult<T> = { data: T } & { error: { message: string } | null }
 
 const AREAS = [
+  ...Array.from({ length: 18 }, (_, index) => `Uttara Sector ${index + 1}`),
+  "Airport",
+  "Kawla",
+  "Dakkhinkhan",
+  "Tongi",
+  "Abdullahpur",
+  "Turag",
+  "Uttarkhan",
+  "House Building",
+  "Azampur",
+  "Diabari",
   "Dhanmondi",
-  "Kalabagan",
-  "Shahbag",
-  "Ramna",
-  "Segunbagicha",
-  "Motijheel",
-  "Paltan",
-  "Gulistan",
-  "Wari",
-  "Sutrapur",
-  "Lalbagh",
-  "Chawkbazar",
-  "Kotwali (Old Dhaka)",
-  "Hazaribagh",
-  "Kamrangirchar",
-  "Malibagh",
-  "Shantinagar",
-  "Khilgaon",
-  "Basabo",
-  "Mugda",
-  "Jatrabari",
-  "Demra",
+  "Mirpur",
 ]
 const PROPERTY_TYPES = ["apartment", "house", "room", "office"] as const
 const PROPERTY_LABELS = [
@@ -183,7 +174,10 @@ async function main() {
   }
   const samira =
     (await findAuthUser(client, "samira")) ??
-    (await findAuthUser(client, "samira@rentease.test")) ??
+    (await findAuthUser(
+      client,
+      process.env.SAMIRA_EMAIL ?? "samira@rentease.test",
+    )) ??
     (
       await must(
         client
@@ -248,32 +242,61 @@ async function main() {
     const type = PROPERTY_TYPES[index % PROPERTY_TYPES.length]
     const label = PROPERTY_LABELS[index % PROPERTY_LABELS.length]
     const rent =
-      area === "Dhanmondi" ||
-      area === "Kalabagan" ||
-      area === "Shahbag" ||
-      area === "Ramna"
-        ? 30000 + (index % 5) * 7500
-        : [
-              "Motijheel",
-              "Paltan",
-              "Segunbagicha",
-              "Malibagh",
-              "Shantinagar",
-            ].includes(area)
-          ? 18000 + (index % 4) * 5000
+      area.startsWith("Uttara Sector") ||
+      [
+        "Airport",
+        "Kawla",
+        "Dakkhinkhan",
+        "Tongi",
+        "Abdullahpur",
+        "Turag",
+        "Uttarkhan",
+        "House Building",
+        "Azampur",
+        "Diabari",
+      ].includes(area)
+        ? 22000 + (index % 5) * 7000
+        : area === "Dhanmondi" ||
+            area === "Kalabagan" ||
+            area === "Shahbag" ||
+            area === "Ramna"
+          ? 30000 + (index % 5) * 7500
           : [
-                "Wari",
-                "Gulistan",
-                "Sutrapur",
-                "Lalbagh",
-                "Kotwali (Old Dhaka)",
-                "Chawkbazar",
-                "Hazaribagh",
+                "Motijheel",
+                "Paltan",
+                "Segunbagicha",
+                "Malibagh",
+                "Shantinagar",
               ].includes(area)
-            ? 10000 + (index % 4) * 3500
-            : 8000 + (index % 4) * 3000
+            ? 18000 + (index % 4) * 5000
+            : [
+                  "Wari",
+                  "Gulistan",
+                  "Sutrapur",
+                  "Lalbagh",
+                  "Kotwali (Old Dhaka)",
+                  "Chawkbazar",
+                  "Hazaribagh",
+                ].includes(area)
+              ? 10000 + (index % 4) * 3500
+              : 8000 + (index % 4) * 3000
     const status =
       index < 24 ? (index < 3 ? "rented" : "approved") : "pending_verification"
+    const locality = area.startsWith("Uttara Sector") ||
+      [
+        "Airport",
+        "Kawla",
+        "Dakkhinkhan",
+        "Tongi",
+        "Abdullahpur",
+        "Turag",
+        "Uttarkhan",
+        "House Building",
+        "Azampur",
+        "Diabari",
+      ].includes(area)
+      ? "Uttara, Dhaka"
+      : "Dhaka"
     return {
       id: id("demo-property", index + 1),
       owner_id: userIds.owners[index % userIds.owners.length],
@@ -282,7 +305,7 @@ async function main() {
         index % 2 ? "south" : "east"
       }-facing rooms. Well suited to Dhaka residents seeking a comfortable, secure home.`,
       property_type: type,
-      address: `Road ${(index % 12) + 1}, ${area}, Dhaka`,
+      address: `Road ${(index % 12) + 1}, ${area}, ${locality}`,
       city: "Dhaka",
       area,
       bedrooms: 1 + (index % 4),
@@ -500,8 +523,43 @@ async function main() {
       }
     }),
   )
+  const existingPayments = await must(
+    client
+      .from("payments")
+      .select(
+        "id, lease_id, tenant_id, owner_id, amount, currency, due_date, paid_at, method, status, provider_reference, receipt_path, verification_status",
+      )
+      .in(
+        "id",
+        payments.map((payment) => payment.id),
+      ),
+    "Read existing demo payments",
+  )
+  const existingPaymentById = new Map(
+    (existingPayments ?? []).map((payment) => [payment.id, payment]),
+  )
+  const reconciledPayments = payments.map((payment) => {
+    const existing = existingPaymentById.get(payment.id)
+    return existing
+      ? {
+          ...payment,
+          lease_id: existing.lease_id,
+          tenant_id: existing.tenant_id,
+          owner_id: existing.owner_id,
+          amount: existing.amount,
+          currency: existing.currency,
+          due_date: existing.due_date,
+          paid_at: existing.paid_at,
+          method: existing.method,
+          status: existing.status,
+          provider_reference: existing.provider_reference,
+          receipt_path: existing.receipt_path,
+          verification_status: existing.verification_status,
+        }
+      : payment
+  })
   await must(
-    client.from("payments").upsert(payments, { onConflict: "id" }),
+    client.from("payments").upsert(reconciledPayments, { onConflict: "id" }),
     "Upsert payments",
   )
   record("payments", payments.length)

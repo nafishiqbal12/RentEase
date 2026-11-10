@@ -12,12 +12,13 @@ type Payment = {
   paid_at: string | null
   method: string | null
   provider_reference: string | null
+  verification_status: string
   status: PaymentStatus
   property: string
   leaseStart: string
   leaseEnd: string
 }
-type PaymentMethod = "bkash" | "nagad" | "card" | "bank_transfer"
+type PaymentMethod = "bkash" | "nagad" | "rocket" | "visa" | "mastercard" | "card" | "bank_transfer"
 
 const statusLabels: Record<PaymentStatus, string> = {
   pending: "Pending",
@@ -105,6 +106,14 @@ function Receipt({
             </span>
           </div>
           <div className="flex justify-between gap-lg">
+            <span className="text-text-secondary">Verification</span>
+            <span className="text-text-primary">
+              {payment.verification_status === "verified"
+                ? "Verified"
+                : "Manual / unverified"}
+            </span>
+          </div>
+          <div className="flex justify-between gap-lg">
             <span className="text-text-secondary">Paid date</span>
             <span className="text-text-primary">
               {formatDate(payment.paid_at)}
@@ -153,6 +162,7 @@ function PaymentModal({
       status: "paid",
       method,
       provider_reference: result?.provider_reference ?? null,
+      verification_status: "manual_unverified",
       paid_at: result?.paid_at ?? new Date().toISOString(),
     })
   }
@@ -187,7 +197,9 @@ function PaymentModal({
             options={[
               { value: "bkash", label: "bKash" },
               { value: "nagad", label: "Nagad" },
-              { value: "card", label: "Card" },
+              { value: "rocket", label: "Rocket" },
+              { value: "visa", label: "Visa" },
+              { value: "mastercard", label: "Mastercard" },
               { value: "bank_transfer", label: "Bank transfer" },
             ]}
             value={method}
@@ -208,7 +220,9 @@ function PaymentModal({
           {saving ? "Confirming..." : "Confirm payment"}
         </Button>
         <div className="mt-lg text-center text-video-title text-text-secondary">
-          This demonstration uses a mock payment gateway.
+          This demonstration records a manual/unverified payment. No card
+          number, CVV, PIN, or OTP is stored. Official gateway verification can
+          be connected later.
         </div>
       </section>
     </div>
@@ -236,7 +250,7 @@ export default function TenantPayments({
     const { data, error: paymentError } = await supabase
       .from("payments")
       .select(
-        "id, lease_id, amount, currency, due_date, paid_at, method, provider_reference, status, leases(start_date, end_date, properties(title))",
+        "id, lease_id, amount, currency, due_date, paid_at, method, provider_reference, verification_status, status, leases(start_date, end_date, properties(title))",
       )
       .eq("tenant_id", tenantId)
       .order("due_date", { ascending: false })
@@ -256,6 +270,7 @@ export default function TenantPayments({
             paid_at: item.paid_at,
             method: item.method,
             provider_reference: item.provider_reference,
+            verification_status: item.verification_status,
             status: item.status as PaymentStatus,
             property: property?.title ?? "Property unavailable",
             leaseStart: lease?.start_date ?? "",
@@ -417,10 +432,19 @@ export default function TenantPayments({
                         {formatDate(payment.paid_at)}
                       </td>
                       <td data-label="Status">
-                        <Badge
-                          label={statusLabels[payment.status]}
-                          variant={paymentVariant(payment.status)}
-                        />
+                        <div className="flex flex-col items-start gap-xs">
+                          <Badge
+                            label={statusLabels[payment.status]}
+                            variant={paymentVariant(payment.status)}
+                          />
+                          {payment.status === "paid" ? (
+                            <span className="text-video-title text-text-secondary">
+                              {payment.verification_status === "verified"
+                                ? "Verified"
+                                : "Manual / unverified"}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td data-label="Action">
                         {payment.status === "pending" ||

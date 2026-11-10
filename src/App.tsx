@@ -1786,21 +1786,48 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState<AuthMessage>(null)
 
   const loadProfile = async (userId: string) => {
+    const profileFields =
+      "id, full_name, email, phone, address, city, area, avatar_url, role, status"
     const { data, error } = await supabase
       .from("profiles")
-      .select(
-        "id, full_name, email, phone, address, city, area, avatar_url, role, status",
-      )
+      .select(profileFields)
       .eq("id", userId)
       .single()
 
-    if (error) {
+    if (error && error.code !== "42703") {
       throw new Error(`Unable to load your profile: ${error.message}`)
     }
-    if (data.status !== "active") {
+
+    let loadedProfile = data
+    if (!error && !loadedProfile) {
+      throw new Error("Unable to load your profile: profile record not found.")
+    }
+    if (error?.code === "42703") {
+      const fallback = await supabase
+        .from("profiles")
+        .select("id, full_name, email, phone, role, status")
+        .eq("id", userId)
+        .single()
+
+      if (fallback.error) {
+        throw new Error(`Unable to load your profile: ${fallback.error.message}`)
+      }
+      loadedProfile = {
+        ...fallback.data,
+        address: null,
+        city: null,
+        area: null,
+        avatar_url: null,
+      }
+    }
+
+    if (!loadedProfile) {
+      throw new Error("Unable to load your profile: profile record not found.")
+    }
+    if (loadedProfile.status !== "active") {
       throw new Error("Your RentEase account is not active.")
     }
-    setProfile(data as Profile)
+    setProfile(loadedProfile as Profile)
     setView("workspace")
   }
 

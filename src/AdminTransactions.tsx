@@ -10,6 +10,7 @@ type Payment = {
   status: string
   method: string | null
   provider_reference: string | null
+  verification_status: string
   tenant: string
   owner: string
   property: string
@@ -32,7 +33,7 @@ export default function AdminTransactions() {
     void supabase
       .from("payments")
       .select(
-        "id, amount, due_date, paid_at, status, method, provider_reference, leases(properties(title), owner:profiles!leases_owner_id_fkey(full_name)), tenant:profiles!payments_tenant_id_fkey(full_name)",
+        "id, amount, due_date, paid_at, status, method, provider_reference, verification_status, leases(properties(title), owner:profiles!leases_owner_id_fkey(full_name)), tenant:profiles!payments_tenant_id_fkey(full_name)",
       )
       .order("due_date", { ascending: false })
       .limit(100)
@@ -64,6 +65,7 @@ export default function AdminTransactions() {
                 status: item.status,
                 method: item.method,
                 provider_reference: item.provider_reference,
+                verification_status: item.verification_status,
                 tenant: tenant?.full_name ?? "Tenant",
                 owner: owner?.full_name ?? "Owner",
                 property: property?.title ?? "Property",
@@ -143,7 +145,7 @@ export default function AdminTransactions() {
                   <th>Amount</th>
                   <th>Due date</th>
                   <th>Payment date</th>
-                  <th>Method / transaction</th>
+                  <th>Method / verification</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -162,10 +164,14 @@ export default function AdminTransactions() {
                         ? new Date(payment.paid_at).toLocaleDateString()
                         : "Not paid"}
                     </td>
-                    <td data-label="Method / transaction">
-                      {payment.method
-                        ? `${payment.method.replace("_", " ")} / ${payment.provider_reference ?? "—"}`
-                        : "—"}
+                    <td data-label="Method / verification">
+                      {payment.method?.replace("_", " ") ?? "—"} /{" "}
+                      {payment.verification_status === "verified"
+                        ? "Verified"
+                        : "Manual / unverified"}
+                      <div className="text-video-title text-text-secondary">
+                        {payment.provider_reference ?? "No reference"}
+                      </div>
                     </td>
                     <td data-label="Status">
                       <Badge

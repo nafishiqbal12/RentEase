@@ -49,6 +49,17 @@ type Filters = {
 }
 
 const areas = [
+  ...Array.from({ length: 18 }, (_, index) => `Uttara Sector ${index + 1}`),
+  "Airport",
+  "Kawla",
+  "Dakkhinkhan",
+  "Tongi",
+  "Abdullahpur",
+  "Turag",
+  "Uttarkhan",
+  "House Building",
+  "Azampur",
+  "Diabari",
   "Dhanmondi",
   "Kalabagan",
   "Shahbag",

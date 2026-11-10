@@ -333,20 +333,15 @@ export default function OwnerApplications({ ownerId }: { ownerId: string }) {
     if (!selected) return
     setSaving(true)
     setError(null)
-    const result =
-      status === "approved"
-        ? await supabase.rpc("approve_rental_application", {
-            application_uuid: selected.id,
-          })
-        : await supabase
-            .from("applications")
-            .update({
-              status,
-              reviewed_by: ownerId,
-              reviewed_at: new Date().toISOString(),
-            })
-            .eq("id", selected.id)
-            .eq("status", "pending")
+    const result = await supabase
+      .from("applications")
+      .update({
+        status,
+        reviewed_by: ownerId,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", selected.id)
+      .eq("status", "pending")
     setSaving(false)
     if (result.error) {
       setError(
